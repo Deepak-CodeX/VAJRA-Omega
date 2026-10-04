@@ -1,0 +1,30 @@
+{
+  "name": "vajra-omega",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "node ./node_modules/typescript/bin/tsc -p tsconfig.test.json && node dist-test/test/phase1-verify.js && node dist-test/test/task11-verify.js && node dist-test/test/task12-verify.js && node dist-test/test/task13-verify.js && node dist-test/test/task14-verify.js && node dist-test/test/task15-verify.js && node dist-test/test/task16-verify.js && node dist-test/test/task17-verify.js && node dist-test/test/task18-verify.js && node dist-test/test/task19-verify.js && node dist-test/test/ui-ux-rebuild-verify.js && node dist-test/test/canonical-phase01-verify.js && node dist-test/test/canonical-phase1-unification-verify.js && node dist-test/test/phase3-telemetry-verify.js"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.12.0",
+    "next": "^14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.13.2",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.0",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.3"
+  }
+}
