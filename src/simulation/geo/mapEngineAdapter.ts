@@ -160,7 +160,41 @@ export class MapEngineAdapter {
   private setupCustomLayers(): void {
     if (!this.map) return;
 
-    // 0. Ensure OpenMapTiles vector 3D building extrusion layer is active
+    // 0. Phase 4.1: 3D Directional Lighting for natural facade and roof contrast
+    try {
+      this.map.setLight({
+        anchor: 'viewport',
+        color: '#d0d8e8',
+        intensity: 0.42,
+        position: [1.2, 215, 35],
+      });
+    } catch {
+      // Ignore if setLight is unsupported
+    }
+
+    // Phase 4.1: Subdue environment layers into a natural, non-neon geographic palette
+    const trySetPaint = (layerId: string, prop: string, value: any) => {
+      if (this.map?.getLayer(layerId)) {
+        try {
+          this.map.setPaintProperty(layerId, prop as any, value);
+        } catch {
+          // Ignore if property is unsupported in current layer type
+        }
+      }
+    };
+
+    trySetPaint('water', 'fill-color', '#09131d');
+    trySetPaint('landuse_park', 'fill-color', '#0e1a14');
+    trySetPaint('landcover_wood', 'fill-color', '#0e1a14');
+    trySetPaint('landuse_residential', 'fill-color', '#10151c');
+    trySetPaint('highway_minor', 'line-color', '#151c24');
+    trySetPaint('highway_major_inner', 'line-color', '#1f2937');
+    trySetPaint('highway_motorway_inner', 'line-color', '#2a374a');
+    trySetPaint('highway_major_casing', 'line-color', '#0c1017');
+    trySetPaint('highway_motorway_casing', 'line-color', '#0c1017');
+    trySetPaint('background', 'background-color', '#0a0e14');
+
+    // 1. Ensure OpenMapTiles vector 3D building extrusion layer is active
     const hasOpenMapTiles = !!this.map.getSource('openmaptiles');
     if (!hasOpenMapTiles) {
       this.map.addSource('openmaptiles', {
@@ -181,11 +215,28 @@ export class MapEngineAdapter {
         'source-layer': 'building',
         minzoom: 13,
         paint: {
+          // Stepped architectural material palette differentiated by real building height
+          // and genuine OSM building:colour if present (never uniform cyan).
           'fill-extrusion-color': [
             'case',
             ['boolean', ['feature-state', 'blackout'], false],
-            '#0b121a',
-            '#1e3a5f',
+            '#070a0e', // De-energized building: deep void slate
+            [
+              'case',
+              ['has', 'colour'],
+              ['get', 'colour'], // Genuine OSM building:colour if present in vector tile
+              [
+                'step',
+                ['coalesce', ['get', 'render_height'], 15],
+                '#18202a', // < 12m: low-rise/residential (deep slate graphite)
+                12,
+                '#1f2937', // 12m - 25m: mid-rise (architectural dark charcoal)
+                25,
+                '#283548', // 25m - 50m: high-rise (structured slate blue-gray)
+                50,
+                '#334155', // >= 50m: skyscrapers/towers (cool steel granite)
+              ],
+            ],
           ] as any,
           'fill-extrusion-height': [
             'interpolate',
@@ -210,7 +261,7 @@ export class MapEngineAdapter {
       });
     }
 
-    // 1. City Boundary Source & Layer
+    // 2. City Boundary Source & Layer
     this.map.addSource('vajra-boundary-src', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
@@ -221,8 +272,8 @@ export class MapEngineAdapter {
       type: 'fill',
       source: 'vajra-boundary-src',
       paint: {
-        'fill-color': '#00e5c8',
-        'fill-opacity': 0.04,
+        'fill-color': '#0284c7',
+        'fill-opacity': 0.02,
       },
     });
 
@@ -231,14 +282,14 @@ export class MapEngineAdapter {
       type: 'line',
       source: 'vajra-boundary-src',
       paint: {
-        'line-color': '#00e5c8',
-        'line-width': 1.5,
+        'line-color': '#0284c7',
+        'line-width': 1.2,
         'line-dasharray': [4, 3],
-        'line-opacity': 0.8,
+        'line-opacity': 0.6,
       },
     });
 
-    // 2. Transmission Line Corridors Source & Layer
+    // 3. Transmission Line Corridors Source & Layer (High-contrast operational blue)
     this.map.addSource('vajra-transmission-src', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
@@ -249,10 +300,10 @@ export class MapEngineAdapter {
       type: 'line',
       source: 'vajra-transmission-src',
       paint: {
-        'line-color': ['coalesce', ['get', 'color'], '#00e5c8'] as any,
-        'line-width': 4,
-        'line-opacity': 0.3,
-        'line-blur': 2,
+        'line-color': ['coalesce', ['get', 'color'], '#0284c7'] as any,
+        'line-width': 4.5,
+        'line-opacity': 0.35,
+        'line-blur': 2.5,
       },
     });
 
@@ -261,13 +312,13 @@ export class MapEngineAdapter {
       type: 'line',
       source: 'vajra-transmission-src',
       paint: {
-        'line-color': ['coalesce', ['get', 'color'], '#00e5c8'] as any,
+        'line-color': ['coalesce', ['get', 'color'], '#38bdf8'] as any,
         'line-width': 2,
-        'line-opacity': 0.9,
+        'line-opacity': 0.95,
       },
     });
 
-    // 3. Substations & Power Assets
+    // 4. Substations & Power Assets (Voltage-scaled, operational border ring)
     this.map.addSource('vajra-substations-src', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
@@ -278,14 +329,22 @@ export class MapEngineAdapter {
       type: 'circle',
       source: 'vajra-substations-src',
       paint: {
-        'circle-radius': 7,
-        'circle-color': ['coalesce', ['get', 'color'], '#f5a623'] as any,
+        'circle-radius': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          10,
+          ['case', ['>=', ['coalesce', ['get', 'voltageKV'], 0], 400], 6, 4],
+          14,
+          ['case', ['>=', ['coalesce', ['get', 'voltageKV'], 0], 400], 8.5, ['>=', ['coalesce', ['get', 'voltageKV'], 0], 220], 7, 5.5],
+        ] as any,
+        'circle-color': ['coalesce', ['get', 'color'], '#0284c7'] as any,
         'circle-stroke-width': 2,
-        'circle-stroke-color': '#ffffff',
+        'circle-stroke-color': ['coalesce', ['get', 'strokeColor'], '#10b981'] as any,
       },
     });
 
-    // 4. Critical Infrastructure
+    // 5. Critical Infrastructure
     this.map.addSource('vajra-infra-src', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
@@ -297,13 +356,13 @@ export class MapEngineAdapter {
       source: 'vajra-infra-src',
       paint: {
         'circle-radius': 6,
-        'circle-color': ['coalesce', ['get', 'color'], '#d9383a'] as any,
+        'circle-color': ['coalesce', ['get', 'color'], '#3b82f6'] as any,
         'circle-stroke-width': 2,
-        'circle-stroke-color': '#ffffff',
+        'circle-stroke-color': ['coalesce', ['get', 'strokeColor'], '#10b981'] as any,
       },
     });
 
-    // 5. Voronoi Estimated Service Regions (Task 16)
+    // 6. Voronoi Estimated Service Regions (Subordinated in normal state)
     this.map.addSource('vajra-service-regions-src', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
@@ -314,8 +373,8 @@ export class MapEngineAdapter {
       type: 'fill',
       source: 'vajra-service-regions-src',
       paint: {
-        'fill-color': ['coalesce', ['get', 'fillColor'], '#00e5c8'] as any,
-        'fill-opacity': ['coalesce', ['get', 'fillOpacity'], 0.07] as any,
+        'fill-color': ['coalesce', ['get', 'fillColor'], '#0f172a'] as any,
+        'fill-opacity': ['coalesce', ['get', 'fillOpacity'], 0.02] as any,
       },
     });
 
@@ -324,14 +383,14 @@ export class MapEngineAdapter {
       type: 'line',
       source: 'vajra-service-regions-src',
       paint: {
-        'line-color': ['coalesce', ['get', 'lineColor'], '#00e5c8'] as any,
-        'line-width': 1.5,
+        'line-color': ['coalesce', ['get', 'lineColor'], '#1e293b'] as any,
+        'line-width': 1.2,
         'line-dasharray': [3, 2],
-        'line-opacity': 0.7,
+        'line-opacity': 0.45,
       },
     });
 
-    // 6. Spatial Load Clusters (Task 16)
+    // 7. Spatial Load Clusters
     this.map.addSource('vajra-load-clusters-src', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
@@ -342,15 +401,15 @@ export class MapEngineAdapter {
       type: 'circle',
       source: 'vajra-load-clusters-src',
       paint: {
-        'circle-radius': 5,
-        'circle-color': '#3a86ff',
+        'circle-radius': 4.5,
+        'circle-color': '#eab308',
         'circle-stroke-width': 1.5,
         'circle-stroke-color': '#ffffff',
-        'circle-opacity': 0.85,
+        'circle-opacity': 0.75,
       },
     });
 
-    // 7. Buildings Layer (Task 18)
+    // 8. Canonical Landmark Buildings Layer
     this.map.addSource('vajra-buildings-src', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
@@ -362,7 +421,7 @@ export class MapEngineAdapter {
       source: 'vajra-buildings-src',
       maxzoom: 13,
       paint: {
-        'fill-color': ['coalesce', ['get', 'color'], '#5a7a8f'] as any,
+        'fill-color': ['coalesce', ['get', 'color'], '#283548'] as any,
         'fill-opacity': ['coalesce', ['get', 'opacity'], 0.25] as any,
       },
     });
@@ -373,20 +432,20 @@ export class MapEngineAdapter {
       source: 'vajra-buildings-src',
       maxzoom: 13,
       paint: {
-        'line-color': ['coalesce', ['get', 'color'], '#5a7a8f'] as any,
+        'line-color': ['coalesce', ['get', 'color'], '#283548'] as any,
         'line-width': 0.8,
         'line-opacity': 0.4,
       },
     });
 
-    // 8. 3D Building Extrusion Layer (Task 19)
+    // 9. 3D Building Extrusion Layer (Landmark extrusions in architectural palette)
     this.map.addLayer({
       id: 'vajra-buildings-extrusion',
       type: 'fill-extrusion',
       source: 'vajra-buildings-src',
       minzoom: 11,
       paint: {
-        'fill-extrusion-color': ['coalesce', ['get', 'color'], '#1e3a5f'] as any,
+        'fill-extrusion-color': ['coalesce', ['get', 'color'], '#283548'] as any,
         'fill-extrusion-height': ['coalesce', ['get', 'height'], 15] as any,
         'fill-extrusion-base': ['coalesce', ['get', 'base_height'], 0] as any,
         'fill-extrusion-opacity': 0.88,
@@ -422,9 +481,9 @@ export class MapEngineAdapter {
 
     this.map.flyTo({
       center: [city.centerCoordinates.longitude, city.centerCoordinates.latitude],
-      zoom: 13.5,
-      pitch: 45,
-      bearing: 15,
+      zoom: 14.0,
+      pitch: 48,
+      bearing: 18,
       duration: durationMs,
       essential: true,
     });
@@ -497,12 +556,19 @@ export class MapEngineAdapter {
         .filter((a) => a.category === 'TRANSMISSION_LINE' && a.pathCoordinates && a.pathCoordinates.length >= 2)
         .map((a) => {
           const corr = corridorImpacts?.[a.electricalAssetId ?? a.id] ?? (corridorImpacts ? Object.values(corridorImpacts).find((c) => c.lineName === a.name) : undefined);
-          let color = '#00e5c8';
-          if (corr) {
-            if (corr.isTripped) color = '#ef4444';
-            else if (corr.isOverloaded) color = '#ef4444';
-            else if (corr.loadingPercent >= 85) color = '#f5a623';
+          const isSimulated = a.provenance?.isVerifiedRealWorld === false || a.provenance?.sourceType === 'SYNTHETIC';
+
+          let color = '#38bdf8'; // BLUE: transmission / public infrastructure
+          if (isSimulated) {
+            color = '#a855f7'; // PURPLE: simulated
+          } else if (corr?.isTripped) {
+            color = '#ef4444'; // RED: failed
+          } else if (corr?.isOverloaded) {
+            color = '#f97316'; // ORANGE: overload
+          } else if ((corr?.loadingPercent ?? 0) >= 85) {
+            color = '#eab308'; // YELLOW: warning
           }
+
           return {
             type: 'Feature' as const,
             properties: {
@@ -513,6 +579,8 @@ export class MapEngineAdapter {
               loadingPercent: corr?.loadingPercent ?? 0,
               isOverloaded: corr?.isOverloaded ?? false,
               isTripped: corr?.isTripped ?? false,
+              isSimulated,
+              provenanceSource: a.provenance?.sourceType ?? 'UNKNOWN',
             },
             geometry: {
               type: 'LineString' as const,
@@ -528,12 +596,38 @@ export class MapEngineAdapter {
       const subFeatures = assets
         .filter((a) => a.category !== 'TRANSMISSION_LINE')
         .map((a) => {
-          let color = '#f5a623';
           const status = subStatuses?.[a.electricalAssetId ?? a.id];
-          if (status === 'FAILED') color = '#ef4444';
+          const isSimulated = a.provenance?.isVerifiedRealWorld === false || a.provenance?.sourceType === 'SYNTHETIC';
+
+          let color = '#0284c7'; // BLUE: verified public infrastructure core
+          let strokeColor = '#10b981'; // GREEN: healthy/verified operational ring
+
+          if (isSimulated) {
+            color = '#a855f7'; // PURPLE: simulated
+            strokeColor = '#c084fc';
+          } else if (status === 'FAILED') {
+            color = '#ef4444'; // RED: failed
+            strokeColor = '#fca5a5';
+          } else if (status === 'OVERLOAD') {
+            color = '#f97316'; // ORANGE: overload
+            strokeColor = '#fed7aa';
+          } else if (status === 'WARNING') {
+            color = '#eab308'; // YELLOW: warning
+            strokeColor = '#fef08a';
+          }
+
           return {
             type: 'Feature' as const,
-            properties: { id: a.id, name: a.name, voltageKV: a.voltageKV, category: a.category, color },
+            properties: {
+              id: a.id,
+              name: a.name,
+              voltageKV: a.voltageKV,
+              category: a.category,
+              color,
+              strokeColor,
+              isSimulated,
+              provenanceSource: a.provenance?.sourceType ?? 'UNKNOWN',
+            },
             geometry: {
               type: 'Point' as const,
               coordinates: [a.coordinates.longitude, a.coordinates.latitude],
@@ -559,11 +653,19 @@ export class MapEngineAdapter {
 
     const features = infra.map((item) => {
       const status = statuses?.[item.id];
-      let color = '#d9383a';
+      let color = '#3b82f6'; // BLUE: public infrastructure
+      let strokeColor = '#10b981'; // GREEN: healthy/verified supply
       if (status) {
-        if (status.powerSupplyState === 'NORMAL_GRID') color = '#10b981';
-        else if (status.powerSupplyState === 'BACKUP_ACTIVE') color = '#f5a623';
-        else color = '#ef4444';
+        if (status.powerSupplyState === 'NORMAL_GRID') {
+          color = '#3b82f6';
+          strokeColor = '#10b981'; // GREEN: healthy
+        } else if (status.powerSupplyState === 'BACKUP_ACTIVE') {
+          color = '#eab308'; // YELLOW: warning / backup active
+          strokeColor = '#fef08a';
+        } else {
+          color = '#ef4444'; // RED: failed / outage
+          strokeColor = '#fca5a5';
+        }
       }
       return {
         type: 'Feature' as const,
@@ -574,6 +676,7 @@ export class MapEngineAdapter {
           priorityTier: item.priorityTier,
           powerState: status?.powerSupplyState ?? 'NORMAL_GRID',
           color,
+          strokeColor,
         },
         geometry: {
           type: 'Point' as const,
@@ -603,19 +706,19 @@ export class MapEngineAdapter {
         ring.push(ring[0]); // Close polygon
       }
       const impact = impacts?.[r.id];
-      let fillColor = '#00e5c8';
-      let fillOpacity = 0.07;
-      let lineColor = '#00e5c8';
+      let fillColor = '#0f172a';
+      let fillOpacity = 0.02; // Visually subordinate in normal state
+      let lineColor = '#1e293b';
 
       if (impact) {
         if (impact.blackoutState === 'TOTAL_BLACKOUT') {
-          fillColor = '#ef4444';
-          fillOpacity = 0.25;
+          fillColor = '#ef4444'; // RED: failed
+          fillOpacity = 0.20;
           lineColor = '#ef4444';
         } else if (impact.blackoutState === 'PARTIAL_CURTAILMENT') {
-          fillColor = '#f5a623';
-          fillOpacity = 0.15;
-          lineColor = '#f5a623';
+          fillColor = '#eab308'; // YELLOW: warning
+          fillOpacity = 0.12;
+          lineColor = '#eab308';
         }
       }
 

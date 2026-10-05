@@ -370,6 +370,7 @@ export default function GeoTwinView() {
           <div className="flex items-center gap-3 text-[9px] text-[#5a7a8f]">
             <span>Lat: {selectedCity?.centerCoordinates.latitude.toFixed(4)}°N</span>
             <span>Lng: {selectedCity?.centerCoordinates.longitude.toFixed(4)}°E</span>
+            <span>Terrain: Planar WGS84 (Verified Flat)</span>
             <span>Population: {selectedCity?.population ? `${(selectedCity.population / 1000000).toFixed(1)}M` : 'N/A'}</span>
             {isFallbackMode && (
               <span className="rounded bg-[#f5a623]/20 px-1 py-0.2 font-mono text-[#f5a623]">
@@ -622,38 +623,43 @@ export default function GeoTwinView() {
             </svg>
           )}
 
-          {/* Layer Legend */}
-          <div className="absolute bottom-2 left-2 z-10 flex flex-col gap-1 rounded border border-[#1b2a38] bg-[#070c12]/90 p-2 text-[9px] font-mono shadow backdrop-blur">
-            <div className="text-[8px] uppercase tracking-wider text-[#5a7a8f] font-bold">MAPPING LEGEND</div>
-            <div className="flex items-center gap-1.5 text-[#00e5c8]">
-              <span>●</span>
-              <span>Verified infrastructure</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-[#f5a623]">
-              <span>◉</span>
-              <span>Source-matched</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-[#3a86ff]">
-              <span>⬡</span>
-              <span>Estimated service region</span>
-            </div>
+          {/* Layer Legend — Phase 4.1 Operational Palette */}
+          <div className="absolute bottom-2 left-2 z-10 flex flex-col gap-1 rounded border border-[#1b2a38] bg-[#070c12]/92 p-2.5 text-[9px] font-mono shadow backdrop-blur max-w-[200px]">
+            <div className="text-[8px] uppercase tracking-wider text-[#5a7a8f] font-bold">REAL ENVIRONMENT</div>
             <div className="flex items-center gap-1.5 text-[#88a4b8]">
-              <span>◇</span>
-              <span>Synthetic simulation</span>
+              <span className="text-[#334155]">■</span>
+              <span>Real 3D Buildings (OSM)</span>
             </div>
+            <div className="flex items-center gap-1.5 text-[#5a7a8f]">
+              <span className="text-[#1f2937]">━</span>
+              <span>Roadway Network</span>
+            </div>
+
             <div className="mt-1 border-t border-[#1b2a38] pt-1">
-              <div className="text-[8px] uppercase tracking-wider text-[#5a7a8f] font-bold">GRID POWER STATE</div>
+              <div className="text-[8px] uppercase tracking-wider text-[#5a7a8f] font-bold">VAJRA ELECTRICAL OVERLAY</div>
               <div className="flex items-center gap-1.5 text-[#10b981]">
                 <span>●</span>
-                <span>Normal / Powered</span>
+                <span>Verified / Healthy (Green)</span>
               </div>
-              <div className="flex items-center gap-1.5 text-[#f5a623]">
+              <div className="flex items-center gap-1.5 text-[#38bdf8]">
+                <span>━</span>
+                <span>Transmission Grid (Blue)</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-[#eab308]">
                 <span>●</span>
-                <span>Curtailment / Backup</span>
+                <span>Warning / Inferred (Yellow)</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-[#f97316]">
+                <span>●</span>
+                <span>Overload State (Orange)</span>
               </div>
               <div className="flex items-center gap-1.5 text-[#ef4444]">
                 <span>●</span>
-                <span>Blackout / Tripped</span>
+                <span>Failed / Tripped (Red)</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-[#a855f7]">
+                <span>◇</span>
+                <span>Simulated Asset (Purple)</span>
               </div>
             </div>
           </div>

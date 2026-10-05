@@ -49,33 +49,33 @@ export const METERS_PER_FLOOR = 3.5;
 export const COLOR_PALETTES = {
   NIGHT: {
     ILLUMINATED: {
-      color: '#1e3a5f',
-      opacity: 0.88,
+      color: '#283548', // Structured slate blue-gray, realistic architectural material tone
+      opacity: 0.92,
       dimmingFactor: 0.0,
     },
     GRID_STRESS: {
-      color: '#6b5314',
-      opacity: 0.80,
+      color: '#eab308', // High-contrast operational warning yellow
+      opacity: 0.85,
       dimmingFactor: 0.25,
     },
     ESTIMATED_OUTAGE: {
-      color: '#131b26',
+      color: '#131b26', // Deep charcoal outage
       opacity: 0.45,
       dimmingFactor: 0.60,
     },
     SEVERE_BLACKOUT: {
-      color: '#060a0f',
+      color: '#070a0e', // De-energized void
       opacity: 0.20,
       dimmingFactor: 0.90,
     },
     RECOVERING: {
-      color: '#0e7490',
-      opacity: 0.85,
+      color: '#0284c7', // Transmission blue recovering
+      opacity: 0.88,
       dimmingFactor: 0.15,
     },
     CRITICAL_BACKUP: {
-      color: '#b45309', // Amber emergency lighting
-      opacity: 0.92,
+      color: '#f59e0b', // Amber emergency backup generator lighting
+      opacity: 0.95,
       dimmingFactor: 0.10,
     },
   },
