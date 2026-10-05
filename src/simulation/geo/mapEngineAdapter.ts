@@ -104,52 +104,25 @@ export class MapEngineAdapter {
         }
       }
 
-      // Dark technical style specification using high-contrast Carto Dark Matter raster tiles
-      const darkStyle: StyleSpecification = {
-        version: 8,
-        name: 'VAJRA Dark Technical Grid',
-        sources: {
-          'carto-dark-tiles': {
-            type: 'raster',
-            tiles: [
-              'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-              'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-              'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-            ],
-            tileSize: 256,
-            attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions" target="_blank">CARTO</a>',
-          },
-        },
-        layers: [
-          {
-            id: 'background',
-            type: 'background',
-            paint: {
-              'background-color': '#070c12',
-            },
-          },
-          {
-            id: 'carto-dark-base',
-            type: 'raster',
-            source: 'carto-dark-tiles',
-            minzoom: 0,
-            maxzoom: 19,
-          },
-        ],
-      };
+      // OpenFreeMap vector dark style: zero watermark, zero API key required
+      const openFreeMapStyle = 'https://tiles.openfreemap.org/styles/dark';
 
       const mapInstance: MapLibreMap = new MapConstructor({
         container,
-        style: darkStyle,
+        style: 'https://tiles.openfreemap.org/styles/dark',
         center: [options.center.longitude, options.center.latitude],
         zoom: options.zoom,
-        pitch: options.pitch ?? 25,
-        bearing: options.bearing ?? 0,
+        pitch: options.pitch ?? 45,
+        bearing: options.bearing ?? 15,
         interactive: options.interactive ?? true,
         attributionControl: false, // Customized in VAJRA UI
       });
 
       this.map = mapInstance;
+      if (typeof window !== 'undefined') {
+        (window as any).__vajraMapAdapter = this;
+        (window as any).__vajraMap = mapInstance;
+      }
 
       mapInstance.on('load', () => {
         if (this.isDestroyed || !this.map) return;
@@ -182,10 +155,60 @@ export class MapEngineAdapter {
   }
 
   /**
-   * Sets up VAJRA GeoJSON vector overlays: boundary, transmission corridors, substations, infra.
+   * Sets up VAJRA GeoJSON vector overlays and 3D streamed building extrusions.
    */
   private setupCustomLayers(): void {
     if (!this.map) return;
+
+    // 0. Ensure OpenMapTiles vector 3D building extrusion layer is active
+    const hasOpenMapTiles = !!this.map.getSource('openmaptiles');
+    if (!hasOpenMapTiles) {
+      this.map.addSource('openmaptiles', {
+        type: 'vector',
+        url: 'https://tiles.openfreemap.org/planet',
+      });
+    }
+
+    if (!this.map.getLayer('osm-streamed-buildings-3d')) {
+      if (this.map.getLayer('building')) {
+        this.map.setLayoutProperty('building', 'visibility', 'none');
+      }
+
+      this.map.addLayer({
+        id: 'osm-streamed-buildings-3d',
+        type: 'fill-extrusion',
+        source: 'openmaptiles',
+        'source-layer': 'building',
+        minzoom: 13,
+        paint: {
+          'fill-extrusion-color': [
+            'case',
+            ['boolean', ['feature-state', 'blackout'], false],
+            '#0b121a',
+            '#1e3a5f',
+          ] as any,
+          'fill-extrusion-height': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            13,
+            0,
+            13.05,
+            ['coalesce', ['get', 'render_height'], 15],
+          ] as any,
+          'fill-extrusion-base': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            13,
+            0,
+            13.05,
+            ['coalesce', ['get', 'render_min_height'], 0],
+          ] as any,
+          'fill-extrusion-opacity': 0.88,
+        },
+      });
+    }
 
     // 1. City Boundary Source & Layer
     this.map.addSource('vajra-boundary-src', {
@@ -380,6 +403,7 @@ export class MapEngineAdapter {
           'vajra-load-clusters-circle',
           'vajra-service-regions-fill',
           'vajra-buildings-extrusion',
+          'osm-streamed-buildings-3d',
           'vajra-buildings-fill',
           'vajra-transmission-core',
         ],
@@ -391,16 +415,16 @@ export class MapEngineAdapter {
   }
 
   /**
-   * Smoothly animates camera to target city coordinates.
+   * Smoothly animates camera to target city coordinates with 3D oblique perspective.
    */
   public flyToCity(city: City, durationMs = 2000): void {
     if (!this.map) return;
 
     this.map.flyTo({
       center: [city.centerCoordinates.longitude, city.centerCoordinates.latitude],
-      zoom: 11.5,
-      pitch: 30,
-      bearing: 0,
+      zoom: 13.5,
+      pitch: 45,
+      bearing: 15,
       duration: durationMs,
       essential: true,
     });
@@ -716,6 +740,13 @@ export class MapEngineAdapter {
         enabled ? 'visible' : 'none',
       );
     }
+    if (this.map.getLayer('osm-streamed-buildings-3d')) {
+      this.map.setLayoutProperty(
+        'osm-streamed-buildings-3d',
+        'visibility',
+        enabled ? 'visible' : 'none',
+      );
+    }
   }
 
   /**
@@ -736,9 +767,9 @@ export class MapEngineAdapter {
 
     const layerMap: Record<string, string[]> = {
       BASE_MAP: ['carto-dark-base'],
-      BUILDINGS: ['vajra-buildings-fill', 'vajra-buildings-line', 'vajra-buildings-extrusion'],
-      '3D_BUILDINGS': ['vajra-buildings-extrusion'],
-      SUBSTATIONS: ['vajra-substations-circle'],
+      BUILDINGS: ['vajra-buildings-fill', 'vajra-buildings-line', 'vajra-buildings-extrusion', 'osm-streamed-buildings-3d'],
+      '3D_BUILDINGS': ['vajra-buildings-extrusion', 'osm-streamed-buildings-3d'],
+      SUBSTATIONS: ['vajra-substations-circle', 'vajra-substations-glow'],
       TRANSMISSION: ['vajra-transmission-glow', 'vajra-transmission-core'],
       CRITICAL_INFRASTRUCTURE: ['vajra-infra-circle'],
       SERVICE_REGIONS: ['vajra-service-regions-fill', 'vajra-service-regions-line'],

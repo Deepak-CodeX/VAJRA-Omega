@@ -10,7 +10,6 @@ import type {
   GeoLayerId,
 } from '@/types/geo';
 import { RealGeoDataProvider } from '@/simulation/geo/realGeoDataProvider';
-import { DeterministicGeoDataProvider } from '@/simulation/geo/deterministicGeoTwin';
 import type { CityTwinPackage } from '@/simulation/geo/geoProvider';
 import { MapEngineAdapter } from '@/simulation/geo/mapEngineAdapter';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -120,23 +119,20 @@ export default function GeoTwinView() {
     };
   }, []);
 
-  // Load twin data when selectedCity changes
+  // Load twin data when selectedCity changes (City-Independent Real Provider)
   useEffect(() => {
     if (!selectedCity) return;
 
-    // First try real provider, then fallback to demo provider for Delhi
     const realProvider = new RealGeoDataProvider();
-    const demoProvider = new DeterministicGeoDataProvider();
 
-    const providerToUse = selectedCity.id === 'city-delhi' ? demoProvider : realProvider;
-
-    providerToUse.loadCityTwin(selectedCity.id).then((pkg) => {
+    realProvider.loadCityTwin(selectedCity.id).then((pkg) => {
       setTwinData(pkg);
 
       if (mapAdapterRef.current && pkg) {
         mapAdapterRef.current.setCityBoundary(pkg.city);
         mapAdapterRef.current.setPowerAssets(pkg.powerAssets);
         mapAdapterRef.current.setCriticalInfrastructure(pkg.criticalInfrastructure);
+        mapAdapterRef.current.setBuildings(pkg.buildings);
         mapAdapterRef.current.flyToCity(pkg.city, 2000);
       }
     });
@@ -150,7 +146,7 @@ export default function GeoTwinView() {
     }
   }, [visibleLayers]);
 
-  // Sync simulation impacts, service regions, and load clusters to MapEngine
+  // Sync simulation impacts, service regions, load clusters, and 3D buildings to MapEngine
   useEffect(() => {
     if (!mapAdapterRef.current) return;
     if (geoTwin?.serviceRegions) {
@@ -174,12 +170,22 @@ export default function GeoTwinView() {
         geoTwin?.simulationImpact?.criticalInfraStatus,
       );
     }
+    if (twinData?.buildings && twinData.buildings.length > 0) {
+      mapAdapterRef.current.update3DBuildings(
+        twinData.buildings,
+        geoTwin?.simulationImpact,
+        geoTwin?.serviceRegions,
+        twinData?.criticalInfrastructure,
+        true,
+      );
+    }
   }, [
     geoTwin?.serviceRegions,
     geoTwin?.loadClusters,
     geoTwin?.simulationImpact,
     twinData?.powerAssets,
     twinData?.criticalInfrastructure,
+    twinData?.buildings,
   ]);
 
   // Update selected entity details drawer
