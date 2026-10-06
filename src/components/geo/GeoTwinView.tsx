@@ -11,7 +11,7 @@ import type {
 } from '@/types/geo';
 import { RealGeoDataProvider } from '@/simulation/geo/realGeoDataProvider';
 import type { CityTwinPackage } from '@/simulation/geo/geoProvider';
-import { MapEngineAdapter } from '@/simulation/geo/mapEngineAdapter';
+import { MapEngineAdapter, type MapBackdropMode } from '@/simulation/geo/mapEngineAdapter';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 const LAYER_LABELS: { id: GeoLayerId; label: string; icon: string }[] = [
@@ -53,6 +53,7 @@ export default function GeoTwinView() {
     Building | CriticalInfrastructure | GeoPowerAsset | null
   >(null);
   const [isFallbackMode, setIsFallbackMode] = useState(false);
+  const [backdropMode, setBackdropModeState] = useState<MapBackdropMode>('CARTOGRAPHIC');
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapAdapterRef = useRef<MapEngineAdapter | null>(null);
@@ -61,6 +62,13 @@ export default function GeoTwinView() {
   const visibleLayers = geoTwin?.visibleLayers;
   const isResolving = geoTwin?.locationResolutionStatus === 'RESOLVING';
   const errorMessage = geoTwin?.errorMessage;
+
+  const handleToggleBackdrop = (mode: MapBackdropMode) => {
+    setBackdropModeState(mode);
+    if (mapAdapterRef.current) {
+      mapAdapterRef.current.setBackdropMode(mode);
+    }
+  };
 
   // Initialize Map Engine on mount
   useEffect(() => {
@@ -87,10 +95,12 @@ export default function GeoTwinView() {
           center: defaultCenter,
           zoom: 11,
           pitch: 25,
+          backdropMode,
         },
         {
           onLoad: () => {
             setMapEngineStatus('READY');
+            adapter.setBackdropMode(backdropMode);
             if (selectedCity) {
               adapter.setCityBoundary(selectedCity);
               adapter.flyToCity(selectedCity, 1000);
@@ -371,6 +381,12 @@ export default function GeoTwinView() {
             <span>Lat: {selectedCity?.centerCoordinates.latitude.toFixed(4)}°N</span>
             <span>Lng: {selectedCity?.centerCoordinates.longitude.toFixed(4)}°E</span>
             <span>Terrain: Planar WGS84 (Verified Flat)</span>
+            <span>
+              Backdrop:{' '}
+              {backdropMode === 'SATELLITE'
+                ? 'CURRENT PUBLIC / EXTERNAL GEOGRAPHIC DATA (Esri World Imagery)'
+                : 'CURRENT PUBLIC (OpenMapTiles / OpenFreeMap)'}
+            </span>
             <span>Population: {selectedCity?.population ? `${(selectedCity.population / 1000000).toFixed(1)}M` : 'N/A'}</span>
             {isFallbackMode && (
               <span className="rounded bg-[#f5a623]/20 px-1 py-0.2 font-mono text-[#f5a623]">
@@ -414,26 +430,53 @@ export default function GeoTwinView() {
           </div>
         )}
 
-        {/* Layer Visibility Toolbar */}
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-[#1b2a38] pb-2">
-          <span className="text-[8px] uppercase tracking-wider text-[#5a7a8f] mr-1">Layers:</span>
-          {LAYER_LABELS.map((layer) => {
-            const isVisible = visibleLayers?.[layer.id] ?? true;
-            return (
-              <button
-                key={layer.id}
-                onClick={() => toggleGeoLayer(layer.id)}
-                className={`flex items-center gap-1 rounded px-2 py-0.5 text-[9px] font-mono transition ${
-                  isVisible
-                    ? 'border border-[#00e5c8]/50 bg-[#00e5c8]/10 text-[#00e5c8]'
-                    : 'border border-[#1b2a38] text-[#5a7a8f] opacity-50 hover:opacity-80'
-                }`}
-              >
-                <span>{layer.icon}</span>
-                <span>{layer.label}</span>
-              </button>
-            );
-          })}
+        {/* Layer Visibility & Backdrop Mode Toolbar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1b2a38] pb-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[8px] uppercase tracking-wider text-[#5a7a8f] mr-1">Layers:</span>
+            {LAYER_LABELS.map((layer) => {
+              const isVisible = visibleLayers?.[layer.id] ?? true;
+              return (
+                <button
+                  key={layer.id}
+                  onClick={() => toggleGeoLayer(layer.id)}
+                  className={`flex items-center gap-1 rounded px-2 py-0.5 text-[9px] font-mono transition ${
+                    isVisible
+                      ? 'border border-[#00e5c8]/50 bg-[#00e5c8]/10 text-[#00e5c8]'
+                      : 'border border-[#1b2a38] text-[#5a7a8f] opacity-50 hover:opacity-80'
+                  }`}
+                >
+                  <span>{layer.icon}</span>
+                  <span>{layer.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Phase 4.3A: Backdrop Toggle */}
+          <div className="flex items-center gap-1 rounded border border-[#1b2a38] bg-[#070c12] p-0.5 text-[9px] font-mono">
+            <span className="text-[8px] uppercase tracking-wider text-[#5a7a8f] px-1">Backdrop:</span>
+            <button
+              onClick={() => handleToggleBackdrop('CARTOGRAPHIC')}
+              className={`rounded px-2 py-0.5 transition ${
+                backdropMode === 'CARTOGRAPHIC'
+                  ? 'border border-[#00e5c8]/60 bg-[#00e5c8]/20 font-bold text-[#00e5c8]'
+                  : 'text-[#88a4b8] hover:text-[#e0edf5]'
+              }`}
+            >
+              🗺️ CARTOGRAPHIC
+            </button>
+            <button
+              onClick={() => handleToggleBackdrop('SATELLITE')}
+              className={`rounded px-2 py-0.5 transition ${
+                backdropMode === 'SATELLITE'
+                  ? 'border border-[#00e5c8]/60 bg-[#00e5c8]/20 font-bold text-[#00e5c8]'
+                  : 'text-[#88a4b8] hover:text-[#e0edf5]'
+              }`}
+            >
+              🛰️ SATELLITE (ESRI)
+            </button>
+          </div>
         </div>
 
         {/* Main Map Viewport */}
@@ -664,9 +707,11 @@ export default function GeoTwinView() {
             </div>
           </div>
 
-          {/* Mandatory OpenStreetMap & CARTO Attribution Overlay */}
-          <div className="absolute bottom-1 right-2 z-10 rounded bg-[#070c12]/80 px-2 py-0.5 text-[8px] font-mono text-[#5a7a8f]">
-            {geoTwin?.attribution ?? '© OpenStreetMap contributors © CARTO'}
+          {/* Mandatory OpenStreetMap, OpenFreeMap & Esri Imagery Attribution Overlay */}
+          <div className="absolute bottom-1 right-2 z-10 rounded bg-[#070c12]/85 px-2 py-0.5 text-[8px] font-mono text-[#5a7a8f]">
+            {backdropMode === 'SATELLITE'
+              ? 'Tiles © Esri, Maxar, Earthstar Geographics, CNES/Airbus DS, USGS, AeroGRID, IGN, GIS Community | © OpenStreetMap contributors'
+              : (geoTwin?.attribution ?? '© OpenStreetMap contributors © OpenFreeMap')}
           </div>
 
           {/* Selected Entity Inspector Drawer */}

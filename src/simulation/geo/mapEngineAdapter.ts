@@ -32,12 +32,29 @@ import type {
 import { Building3DExtruder } from './building3DExtruder';
 
 
+export type MapBackdropMode = 'CARTOGRAPHIC' | 'SATELLITE';
+
+export const ESRI_WORLD_IMAGERY_CONFIG = {
+  id: 'satellite-imagery-src',
+  layerId: 'satellite-imagery-layer',
+  type: 'raster' as const,
+  tiles: [
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  ],
+  tileSize: 256,
+  maxzoom: 19,
+  attribution:
+    'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, CNES/Airbus DS, USGS, AeroGRID, IGN, and the GIS User Community',
+  provenanceClassification: 'CURRENT PUBLIC / EXTERNAL GEOGRAPHIC DATA' as const,
+};
+
 export interface MapEngineOptions {
   center: GeoCoordinate;
   zoom: number;
   pitch?: number;
   bearing?: number;
   interactive?: boolean;
+  backdropMode?: MapBackdropMode;
 }
 
 export interface MapEngineEventHandlers {
@@ -52,6 +69,7 @@ export class MapEngineAdapter {
   private isLoaded = false;
   private isDestroyed = false;
   private handlers: MapEngineEventHandlers = {};
+  private currentBackdropMode: MapBackdropMode = 'CARTOGRAPHIC';
 
   /**
    * Check if the client environment supports WebGL rendering.
@@ -82,6 +100,7 @@ export class MapEngineAdapter {
     }
 
     this.handlers = handlers;
+    this.currentBackdropMode = options.backdropMode ?? 'CARTOGRAPHIC';
 
     try {
       const maplibreModule = (await import('maplibre-gl')) as any;
@@ -194,6 +213,40 @@ export class MapEngineAdapter {
     trySetPaint('highway_motorway_casing', 'line-color', '#0c1017');
     trySetPaint('background', 'background-color', '#0a0e14');
 
+    // 0.1 Phase 4.3A: Genuine Satellite / Orthophoto Raster Backdrop Source (Esri World Imagery)
+    const hasSatelliteSource = !!this.map.getSource('satellite-imagery-src');
+    if (!hasSatelliteSource) {
+      this.map.addSource('satellite-imagery-src', {
+        type: 'raster',
+        tiles: [
+          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        ],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution:
+          'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, CNES/Airbus DS, USGS, AeroGRID, IGN, and the GIS User Community',
+      });
+    }
+
+    if (!this.map.getLayer('satellite-imagery-layer')) {
+      const firstVectorLayerId = this.map.getLayer('water') ? 'water' : undefined;
+      this.map.addLayer(
+        {
+          id: 'satellite-imagery-layer',
+          type: 'raster',
+          source: 'satellite-imagery-src',
+          paint: {
+            'raster-opacity': 1.0,
+            'raster-fade-duration': 300,
+          },
+          layout: {
+            visibility: this.currentBackdropMode === 'SATELLITE' ? 'visible' : 'none',
+          },
+        },
+        firstVectorLayerId,
+      );
+    }
+
     // 1. Ensure OpenMapTiles vector 3D building extrusion layer is active
     const hasOpenMapTiles = !!this.map.getSource('openmaptiles');
     if (!hasOpenMapTiles) {
@@ -216,26 +269,20 @@ export class MapEngineAdapter {
         minzoom: 13,
         paint: {
           // Stepped architectural material palette differentiated by real building height
-          // and genuine OSM building:colour if present (never uniform cyan).
           'fill-extrusion-color': [
             'case',
             ['boolean', ['feature-state', 'blackout'], false],
             '#070a0e', // De-energized building: deep void slate
             [
-              'case',
-              ['has', 'colour'],
-              ['get', 'colour'], // Genuine OSM building:colour if present in vector tile
-              [
-                'step',
-                ['coalesce', ['get', 'render_height'], 15],
-                '#18202a', // < 12m: low-rise/residential (deep slate graphite)
-                12,
-                '#1f2937', // 12m - 25m: mid-rise (architectural dark charcoal)
-                25,
-                '#283548', // 25m - 50m: high-rise (structured slate blue-gray)
-                50,
-                '#334155', // >= 50m: skyscrapers/towers (cool steel granite)
-              ],
+              'step',
+              ['coalesce', ['get', 'render_height'], 15],
+              '#18202a', // < 12m: low-rise/residential (deep slate graphite)
+              12,
+              '#1f2937', // 12m - 25m: mid-rise (architectural dark charcoal)
+              25,
+              '#283548', // 25m - 50m: high-rise (structured slate blue-gray)
+              50,
+              '#334155', // >= 50m: skyscrapers/towers (cool steel granite)
             ],
           ] as any,
           'fill-extrusion-height': [
@@ -487,6 +534,48 @@ export class MapEngineAdapter {
       duration: durationMs,
       essential: true,
     });
+  }
+
+  /**
+   * Toggles backdrop mode between CARTOGRAPHIC and SATELLITE (Phase 4.3A).
+   */
+  public setBackdropMode(mode: MapBackdropMode): void {
+    this.currentBackdropMode = mode;
+    if (!this.map || !this.isLoaded) return;
+
+    const isSatellite = mode === 'SATELLITE';
+    if (this.map.getLayer('satellite-imagery-layer')) {
+      this.map.setLayoutProperty('satellite-imagery-layer', 'visibility', isSatellite ? 'visible' : 'none');
+    }
+
+    const setOpacity = (layerId: string, opacity: number) => {
+      if (this.map?.getLayer(layerId)) {
+        try {
+          this.map.setPaintProperty(layerId, 'fill-opacity', opacity);
+        } catch {
+          // Ignore
+        }
+      }
+    };
+
+    if (isSatellite) {
+      setOpacity('water', 0.35);
+      setOpacity('landuse_park', 0.2);
+      setOpacity('landuse_residential', 0.0);
+      setOpacity('landcover_wood', 0.2);
+    } else {
+      setOpacity('water', 1.0);
+      setOpacity('landuse_park', 1.0);
+      setOpacity('landuse_residential', 1.0);
+      setOpacity('landcover_wood', 1.0);
+    }
+  }
+
+  /**
+   * Gets the active backdrop mode.
+   */
+  public getBackdropMode(): MapBackdropMode {
+    return this.currentBackdropMode;
   }
 
   /**
