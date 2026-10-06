@@ -381,7 +381,8 @@ export const useVajraStore = create<VajraStore>((set, get) => ({
     simRng = new SeededRandom(seed);
 
     // Phase 1: Build canonical grid topology directly from verified PowerAssets
-    const activeCityId = get().geoTwin?.selectedCity?.id ?? 'city-delhi';
+    const currentCity = get().geoTwin?.selectedCity ?? DEMO_CITIES['city-delhi'];
+    const activeCityId = currentCity?.id ?? 'city-delhi';
     const topology = buildCanonicalTopology(activeCityId, { seed });
 
     // Run one tick to populate initial values
@@ -422,7 +423,14 @@ export const useVajraStore = create<VajraStore>((set, get) => ({
       activeCascade: null,
       activeCascadeStepIndex: 0,
       isCascadeRunning: false,
-      geoTwin: { ...DEFAULT_GEO_TWIN_STATE },
+      geoTwin: {
+        ...DEFAULT_GEO_TWIN_STATE,
+        selectedCity: currentCity,
+        serviceRegions: get().geoTwin?.serviceRegions ?? [],
+        loadClusters: get().geoTwin?.loadClusters ?? [],
+        loadZones: get().geoTwin?.loadZones ?? [],
+        electricalGeoMappings: get().geoTwin?.electricalGeoMappings ?? [],
+      },
       initialized: true,
     });
   },
@@ -1017,6 +1025,7 @@ export const useVajraStore = create<VajraStore>((set, get) => ({
     );
 
     set({
+      topology: { ...state.topology },
       powerBalance,
       metrics,
       anomalies,
@@ -1066,6 +1075,7 @@ export const useVajraStore = create<VajraStore>((set, get) => ({
     );
 
     set({
+      topology: { ...state.topology },
       powerBalance,
       metrics,
       anomalies,
@@ -1600,9 +1610,13 @@ export const useVajraStore = create<VajraStore>((set, get) => ({
       const twinPkg = await defaultCityResolver.loadTwin(city.id);
       const updated = get().geoTwin ?? DEFAULT_GEO_TWIN_STATE;
 
+      // Switch simulation engine to consume canonical PowerAsset topology for this city
+      const topology = buildCanonicalTopology(city.id, { seed: 42 });
+      const { powerBalance, metrics } = simulationTick(topology, get().clock.tick, simRng);
+
       // Task 16: Bridge electrical topology to geographic entities
       const mapper = new GeoElectricalMapper(
-        get().topology,
+        topology,
         city,
         twinPkg ? twinPkg.powerAssets : [],
         twinPkg ? twinPkg.buildings : [],
@@ -1611,7 +1625,7 @@ export const useVajraStore = create<VajraStore>((set, get) => ({
       const mappingResult = mapper.executeMapping();
 
       const geoImpact = GeoSimulationCoordinator.computeGeoSimulationImpact(
-        get().topology,
+        topology,
         {
           ...updated,
           serviceRegions: mappingResult.serviceRegions,
@@ -1623,7 +1637,13 @@ export const useVajraStore = create<VajraStore>((set, get) => ({
         get().clock.tick,
       );
 
+      const updatedTimeSeries = recordSimulationTelemetry(get().timeSeries, get().clock.tick, metrics);
+
       set({
+        topology,
+        powerBalance,
+        metrics,
+        timeSeries: updatedTimeSeries,
         geoTwin: {
           ...updated,
           selectedCity: city,

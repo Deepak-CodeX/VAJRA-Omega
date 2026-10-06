@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useVajraStore } from '@/store/vajraStore';
 import { CANONICAL_CITIES_REGISTRY, CANONICAL_POWER_ASSETS } from '@/data/canonicalCitiesData';
 import type { PowerAsset } from '@/types/powerAsset';
@@ -18,6 +18,8 @@ import DataSourcesView from '@/components/views/DataSourcesView';
 import AssetInspectorDrawer from '@/components/shell/AssetInspectorDrawer';
 import BottomTimelineBar from '@/components/shell/BottomTimelineBar';
 
+import { GeoSimulationCoordinator } from '@/simulation/geo/geoSimulationCoordinator';
+import { DEFAULT_GEO_TWIN_STATE } from '@/store/vajraStore';
 import { tickToTimestamp } from '@/lib/utils';
 
 export type NavViewId =
@@ -31,17 +33,28 @@ export type NavViewId =
 
 export default function AppShell() {
   const currentCity = useVajraStore((s) => s.geoTwin?.selectedCity);
+  const geoTwin = useVajraStore((s) => s.geoTwin);
   const selectedEntityId = useVajraStore((s) => s.geoTwin?.selectedEntityId);
   const selectGeoEntity = useVajraStore((s) => s.selectGeoEntity);
   const searchAndNavigateCity = useVajraStore((s) => s.searchAndNavigateCity);
   const clock = useVajraStore((s) => s.clock);
   const metrics = useVajraStore((s) => s.metrics);
   const activeCascade = useVajraStore((s) => s.activeCascade);
+  const topology = useVajraStore((s) => s.topology);
+  const injectFault = useVajraStore((s) => s.injectFault);
+  const generateRecovery = useVajraStore((s) => s.generateRecovery);
+  const executeRecovery = useVajraStore((s) => s.executeRecovery);
 
   // Shell State
   const [activeNav, setActiveNav] = useState<NavViewId>('overview');
   const [isInspectorOpen, setIsInspectorOpen] = useState<boolean>(true);
   const [citySelectorOpen, setCitySelectorOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__vajraStore = useVajraStore;
+    }
+  }, []);
 
   // Initial 8 cities
   const cityId = currentCity?.id ?? 'city-delhi';
@@ -50,11 +63,55 @@ export default function AppShell() {
     return CANONICAL_POWER_ASSETS[cityId] || CANONICAL_POWER_ASSETS['city-delhi'] || [];
   }, [cityId]);
 
-  // Selected Power Asset
+  // Selected Power Asset with Dynamic Operational Simulation State
   const selectedAsset = useMemo(() => {
-    if (!selectedEntityId) return null;
-    return allPowerAssets.find((a) => a.id === selectedEntityId) || null;
-  }, [allPowerAssets, selectedEntityId]);
+    const base =
+      allPowerAssets.find((a) => a.id === selectedEntityId) ||
+      Object.values(CANONICAL_POWER_ASSETS).flat().find((a) => a.id === selectedEntityId) ||
+      null;
+    if (!base) return null;
+
+    // Check dynamic simulation state from authoritative topology
+    const elecId = (base as any).electricalAssetId;
+    const sub = topology.substations.find(
+      (s) => s.id === base.id || (elecId && s.id === elecId) || base.id.includes(s.id) || s.id.includes(base.id),
+    );
+    const line = topology.transmissionLines.find(
+      (l) => l.id === base.id || (elecId && l.id === elecId) || l.name === base.name,
+    );
+
+    let simStatus: string = base.status;
+    let loading = base.loadingPercent;
+
+    if (sub) {
+      const subLoading = sub.capacityMW > 0 ? (sub.currentLoadMW / sub.capacityMW) * 100 : ((sub as any).loadingPercent ?? 65);
+      simStatus =
+        sub.status === 'FAILED' || sub.status === 'ISOLATED'
+          ? 'SIMULATED TRIPPED'
+          : subLoading >= 100
+          ? 'SIMULATED OVERLOAD'
+          : subLoading >= 85
+          ? 'SIMULATED WARNING'
+          : 'ONLINE';
+      loading = subLoading;
+    } else if (line) {
+      simStatus =
+        line.status === 'FAILED'
+          ? 'SIMULATED TRIPPED'
+          : line.loadingPercent >= 100
+          ? 'SIMULATED OVERLOAD'
+          : line.loadingPercent >= 85
+          ? 'SIMULATED WARNING'
+          : 'ONLINE';
+      loading = line.loadingPercent;
+    }
+
+    return {
+      ...base,
+      status: simStatus as any,
+      loadingPercent: loading,
+    };
+  }, [allPowerAssets, selectedEntityId, topology]);
 
   // Simulation Status derivation
   const isCascadeActive = (activeCascade?.affectedAssetIds?.length ?? 0) > 0;
@@ -253,11 +310,20 @@ export default function AppShell() {
           onClose={() => setIsInspectorOpen(false)}
           onFlyToAsset={handleFlyToGeo}
           onTripAsset={(asset) => {
-            // Force trip in simulation
-            selectGeoEntity(asset.id);
+            const target = GeoSimulationCoordinator.resolveGeoFaultTarget(
+              asset.id,
+              geoTwin ?? { ...DEFAULT_GEO_TWIN_STATE },
+              topology,
+            );
+            if (target) {
+              injectFault('SUBSTATION_FAILURE', [target.targetAssetId]);
+            } else {
+              injectFault('SUBSTATION_FAILURE', [asset.id]);
+            }
           }}
-          onRestoreAsset={(asset) => {
-            selectGeoEntity(asset.id);
+          onRestoreAsset={(_asset) => {
+            generateRecovery();
+            executeRecovery();
           }}
         />
       </div>
