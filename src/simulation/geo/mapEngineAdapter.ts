@@ -63,6 +63,7 @@ export interface MapEngineEventHandlers {
   onError?: (error: Error) => void;
   onCameraChange?: (viewport: GeoViewport) => void;
   onEntityClick?: (entityId: string) => void;
+  onFeatureClick?: (feature: any, lngLat: { lng: number; lat: number }) => void;
 }
 
 export class MapEngineAdapter {
@@ -70,7 +71,20 @@ export class MapEngineAdapter {
   private isLoaded = false;
   private isDestroyed = false;
   private handlers: MapEngineEventHandlers = {};
+  public get eventHandlers(): MapEngineEventHandlers { return this.handlers; }
   private currentBackdropMode: MapBackdropMode = 'CARTOGRAPHIC';
+  private activeFlowLines: Array<{
+    pSrc: [number, number];
+    pDst: [number, number];
+    flowColor: string;
+    flowMW: number;
+    loading: number;
+    id: string;
+    isFocused: boolean;
+    density: number;
+  }> = [];
+  private flowAnimFrameId: number | null = null;
+  private animPhase: number = 0;
 
   public static readonly BASE_MAP_LAYER_IDS = [
     'background',
@@ -190,6 +204,7 @@ export class MapEngineAdapter {
       this.map = mapInstance;
       if (typeof window !== 'undefined') {
         (window as any).__vajraMapAdapter = this;
+        (window as any).__vajra_mapAdapter = this;
         (window as any).__vajraMap = mapInstance;
       }
 
@@ -418,7 +433,15 @@ export class MapEngineAdapter {
       source: 'vajra-transmission-src',
       paint: {
         'line-color': ['coalesce', ['get', 'flowColor'], ['get', 'color'], '#38bdf8'] as any,
-        'line-width': ['coalesce', ['get', 'flowLineWidth'], 2.8] as any,
+        'line-width': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          10,
+          ['coalesce', ['get', 'flowLineWidth'], ['case', ['>=', ['coalesce', ['get', 'voltageKV'], 0], 400], 2.8, 1.8]],
+          14,
+          ['coalesce', ['get', 'flowLineWidth'], ['case', ['>=', ['coalesce', ['get', 'voltageKV'], 0], 400], 3.8, 2.4]],
+        ] as any,
         'line-opacity': ['coalesce', ['get', 'opacity'], 0.95] as any,
       },
     });
@@ -759,10 +782,14 @@ export class MapEngineAdapter {
         const topFeature = features[0];
         const targetId =
           topFeature.properties?.id ||
-          (topFeature.properties?.osm_id ? `osm-${topFeature.properties.osm_id}` : null);
+          (topFeature.properties?.osm_id ? `osm-${topFeature.properties.osm_id}` : `feat-${Math.round(e.lngLat.lat * 10000)}-${Math.round(e.lngLat.lng * 10000)}`);
         if (targetId) {
           this.handlers.onEntityClick?.(targetId);
         }
+        this.handlers.onFeatureClick?.(topFeature, { lng: e.lngLat.lng, lat: e.lngLat.lat });
+      } else {
+        this.handlers.onEntityClick?.('');
+        this.handlers.onFeatureClick?.(null, { lng: e.lngLat.lng, lat: e.lngLat.lat });
       }
     });
   }
@@ -779,6 +806,27 @@ export class MapEngineAdapter {
       pitch: 48,
       bearing: 18,
       duration: durationMs,
+      essential: true,
+    });
+  }
+
+  /**
+   * Smoothly animates camera to target geodetic coordinate with 3D oblique perspective.
+   */
+  public flyToCoordinates(
+    coords: { latitude: number; longitude: number },
+    zoom: number = 15.5,
+    pitch: number = 48,
+    bearing?: number,
+  ): void {
+    if (!this.map) return;
+    const currentBearing = this.map.getBearing() ?? 0;
+    this.map.flyTo({
+      center: [coords.longitude, coords.latitude],
+      zoom: Math.max(10, Math.min(19, zoom)),
+      pitch: Math.max(0, Math.min(60, pitch)),
+      bearing: bearing !== undefined ? bearing : (currentBearing || 18),
+      duration: 1600,
       essential: true,
     });
   }
@@ -938,6 +986,7 @@ export class MapEngineAdapter {
     if (lineSource) {
       const arrowFeatures: any[] = [];
       const particleFeatures: any[] = [];
+      const newActiveFlowLines: typeof this.activeFlowLines = [];
 
       const lineFeatures = assets
         .filter((a) => a.category === 'TRANSMISSION_LINE' && a.pathCoordinates && a.pathCoordinates.length >= 2)
@@ -1008,11 +1057,23 @@ export class MapEngineAdapter {
               },
             });
 
-            // Build Moving Particle Pulses along line (phase tied to currentTick)
-            const pSrc = direction === 'B_TO_A' ? p1 : p0;
-            const pDst = direction === 'B_TO_A' ? p0 : p1;
+            // Build Moving Particle Pulses along line (phase tied to currentTick & live continuous animator)
+            const pSrc: [number, number] = direction === 'B_TO_A' ? [p1[0], p1[1]] : [p0[0], p0[1]];
+            const pDst: [number, number] = direction === 'B_TO_A' ? [p0[0], p0[1]] : [p1[0], p1[1]];
+            const density = loading >= 80 || flowMW >= 300 ? 4 : flowMW >= 100 ? 3 : 2;
 
-            for (let i = 0; i < 3; i++) {
+            newActiveFlowLines.push({
+              pSrc,
+              pDst,
+              flowColor,
+              flowMW,
+              loading,
+              id: a.id,
+              isFocused,
+              density,
+            });
+
+            for (let i = 0; i < density; i++) {
               const phase = ((currentTick * 0.18 + i * 0.33) % 1.0);
               const curLng = pSrc[0] + (pDst[0] - pSrc[0]) * phase;
               const curLat = pSrc[1] + (pDst[1] - pSrc[1]) * phase;
@@ -1069,6 +1130,9 @@ export class MapEngineAdapter {
       if (particleSource) {
         particleSource.setData({ type: 'FeatureCollection', features: particleFeatures });
       }
+
+      this.activeFlowLines = newActiveFlowLines;
+      this.startFlowAnimation();
     }
 
     if (subSource) {
@@ -1453,13 +1517,15 @@ export class MapEngineAdapter {
     const layerMap: Record<string, string[]> = {
       BUILDINGS: ['vajra-buildings-fill', 'vajra-buildings-line', 'vajra-buildings-extrusion', 'osm-streamed-buildings-3d'],
       '3D_BUILDINGS': ['vajra-buildings-extrusion', 'osm-streamed-buildings-3d'],
-      SUBSTATIONS: ['vajra-substations-circle'],
-      TRANSMISSION: ['vajra-transmission-glow', 'vajra-transmission-core'],
+      SUBSTATIONS: ['vajra-substations-circle', 'vajra-substations-badge'],
+      TRANSMISSION: ['vajra-transmission-glow', 'vajra-transmission-core', 'vajra-transmission-arrows', 'vajra-flow-particles-layer'],
+      POWER_FLOW: ['vajra-transmission-arrows', 'vajra-flow-particles-layer'],
       CRITICAL_INFRASTRUCTURE: ['vajra-infra-circle'],
       SERVICE_REGIONS: ['vajra-service-regions-fill', 'vajra-service-regions-line'],
       LOAD_CLUSTERS: ['vajra-load-clusters-circle'],
       LOAD_ZONES: ['vajra-load-zones-fill', 'vajra-load-zones-line'],
       GRID_HEALTH: ['vajra-substations-health-ring', 'vajra-transmission-health-glow'],
+      FAILURES: ['vajra-substations-badge'],
     };
 
     const targetLayerIds = layerMap[layerId] || [layerId];
@@ -1523,8 +1589,70 @@ export class MapEngineAdapter {
     this.map?.resize();
   }
 
+  /**
+   * Continuous GPU-friendly WebGL animation loop for active power flow particles.
+   * Runs at ~25-30fps directly updating the GeoJSON source with zero React re-renders.
+   */
+  private startFlowAnimation(): void {
+    if (this.flowAnimFrameId !== null || typeof window === 'undefined') return;
+
+    let lastTime = performance.now();
+    const animate = (now: number) => {
+      if (this.isDestroyed || !this.map) {
+        this.flowAnimFrameId = null;
+        return;
+      }
+
+      const elapsed = now - lastTime;
+      if (elapsed >= 35) {
+        lastTime = now;
+        this.animPhase = (this.animPhase + elapsed / 1200) % 1.0;
+
+        const particleSource = this.map.getSource('vajra-flow-particles-src') as GeoJSONSource | undefined;
+        if (particleSource && this.activeFlowLines.length > 0) {
+          const particleFeatures: any[] = [];
+          for (const line of this.activeFlowLines) {
+            const count = line.density;
+            for (let i = 0; i < count; i++) {
+              const phase = (this.animPhase + i / count) % 1.0;
+              const curLng = line.pSrc[0] + (line.pDst[0] - line.pSrc[0]) * phase;
+              const curLat = line.pSrc[1] + (line.pDst[1] - line.pSrc[1]) * phase;
+
+              particleFeatures.push({
+                type: 'Feature',
+                properties: {
+                  id: `pulse-${line.id}-${i}`,
+                  color: line.flowColor,
+                  radius: line.isFocused ? (line.flowMW > 400 ? 4.5 : 3.5) : 2.5,
+                  opacity: line.isFocused ? 0.95 : 0.25,
+                },
+                geometry: {
+                  type: 'Point',
+                  coordinates: [curLng, curLat],
+                },
+              });
+            }
+          }
+          try {
+            particleSource.setData({ type: 'FeatureCollection', features: particleFeatures });
+          } catch {
+            // Source busy or style reload
+          }
+        }
+      }
+
+      this.flowAnimFrameId = requestAnimationFrame(animate);
+    };
+
+    this.flowAnimFrameId = requestAnimationFrame(animate);
+  }
+
   public destroy(): void {
     this.isDestroyed = true;
+    if (this.flowAnimFrameId !== null && typeof window !== 'undefined') {
+      cancelAnimationFrame(this.flowAnimFrameId);
+      this.flowAnimFrameId = null;
+    }
     if (this.map) {
       this.map.remove();
       this.map = null;

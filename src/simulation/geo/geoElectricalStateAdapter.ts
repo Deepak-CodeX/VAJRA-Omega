@@ -384,7 +384,7 @@ export class GeoElectricalStateAdapter {
       let isOverloaded = false;
 
       const loadingPercent = simLine?.loadingPercent ?? 60;
-      const signedFlowMW = simLine ? Math.round(simLine.currentFlowMW * 10) / 10 : Math.round(loadingPercent * 4 * 10) / 10;
+      const signedFlowMW = simLine ? Math.round(simLine.currentFlowMW * 100) / 100 : Math.round(loadingPercent * 4 * 100) / 100;
       const activePowerFlowMW = Math.abs(signedFlowMW);
 
       // Deterministic flow direction
@@ -430,7 +430,8 @@ export class GeoElectricalStateAdapter {
       }
 
       // Visual encoding: deterministic width scaled by loading magnitude
-      const flowLineWidth = Math.max(1.8, Math.min(6.5, 1.8 + (loadingPercent / 100) * 4.2));
+      const effectiveLoading = activePowerFlowMW < 0.05 ? 0 : loadingPercent;
+      const flowLineWidth = Math.max(1.8, Math.min(6.5, 1.8 + (effectiveLoading / 100) * 4.2));
 
       // Operational flow color (Green = normal flow on blue infrastructure, Orange = overload, Red = tripped)
       const flowColor = isTripped

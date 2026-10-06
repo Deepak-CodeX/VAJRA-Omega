@@ -91,6 +91,24 @@ export interface PowerAsset {
   feedersCount?: number;
   connectedAssetIds: string[];                   // Verified topological links ONLY
   inferredAssetIds?: string[];                   // Proximity-based links (explicitly INFERRED)
+
+  // Phase 5: Dynamic Electrical Flow & Topological Inspection
+  activePowerFlowMW?: number;
+  signedFlowMW?: number;
+  flowDirection?: 'A_TO_B' | 'B_TO_A' | 'ZERO';
+  directionDescription?: string;
+  fromSubstationId?: string;
+  toSubstationId?: string;
+  fromSubstationName?: string;
+  toSubstationName?: string;
+  geometryTypeDescription?: string;
+  demandMW?: number;
+  suppliedMW?: number;
+  unservedMW?: number;
+  supplyingSubstations?: { id: string; name: string; flowMW: number }[];
+  upstreamSubstations?: { id: string; name: string; flowMW: number }[];
+  downstreamSubstations?: { id: string; name: string; flowMW: number }[];
+  suppliedLoadRegions?: string[];
 }
 
 export interface CityRegistryEntry {

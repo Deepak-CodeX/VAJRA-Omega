@@ -244,7 +244,8 @@ export type GeoLayerId =
   | 'FAILURES'
   | 'CASCADE_PROPAGATION'
   | 'SERVICE_REGIONS'
-  | 'LOAD_CLUSTERS';
+  | 'LOAD_CLUSTERS'
+  | 'POWER_FLOW';
 
 export interface GeoLayerConfig {
   id: GeoLayerId;
@@ -362,6 +363,7 @@ export interface GeoTwinState {
   selectedCity: City | null;
   selectedRegion: Region | null;
   selectedEntityId: string | null;
+  selectedFeatureIdentity?: import('./geoFeatureIdentity').GeoFeatureIdentity | null;
   viewport: GeoViewport;
   visibleLayers: Record<GeoLayerId, boolean>;
   searchQuery: string;

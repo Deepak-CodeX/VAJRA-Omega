@@ -116,6 +116,8 @@ interface StoreActions {
   selectGeoCity: (cityId: string) => Promise<void>;
   /** Select an individual geographic entity for inspection */
   selectGeoEntity: (entityId: string | null) => void;
+  /** Set true geographic feature identity with provenance and metadata */
+  setSelectedFeatureIdentity: (identity: import('@/types/geoFeatureIdentity').GeoFeatureIdentity | null) => void;
   /** Update viewport / camera parameters */
   setGeoViewport: (viewport: Partial<GeoViewport>) => void;
   /** Toggle visibility of a specific geographic data layer */
@@ -264,6 +266,7 @@ export const DEFAULT_GEO_LAYERS: Record<GeoLayerId, boolean> = {
   CASCADE_PROPAGATION: true,
   SERVICE_REGIONS: true,
   LOAD_CLUSTERS: true,
+  POWER_FLOW: true,
 };
 
 export const DEFAULT_GEO_TWIN_STATE: GeoTwinState = {
@@ -1489,6 +1492,7 @@ export const useVajraStore = create<VajraStore>((set, get) => ({
         ...current,
         selectedCity: twinPkg.city,
         selectedEntityId: null,
+        selectedFeatureIdentity: null,
         loadedEntitiesCount:
           twinPkg.buildings.length +
           twinPkg.criticalInfrastructure.length +
@@ -1529,6 +1533,18 @@ export const useVajraStore = create<VajraStore>((set, get) => ({
       geoTwin: {
         ...current,
         selectedEntityId: entityId,
+        selectedFeatureIdentity: entityId === null ? null : (current.selectedFeatureIdentity?.featureId === entityId ? current.selectedFeatureIdentity : null),
+      },
+    });
+  },
+
+  setSelectedFeatureIdentity: (identity: import('@/types/geoFeatureIdentity').GeoFeatureIdentity | null) => {
+    const current = get().geoTwin ?? DEFAULT_GEO_TWIN_STATE;
+    set({
+      geoTwin: {
+        ...current,
+        selectedFeatureIdentity: identity,
+        selectedEntityId: identity ? identity.featureId : null,
       },
     });
   },
@@ -1648,6 +1664,7 @@ export const useVajraStore = create<VajraStore>((set, get) => ({
           ...updated,
           selectedCity: city,
           selectedEntityId: null,
+          selectedFeatureIdentity: null,
           locationResolutionStatus: 'SUCCESS',
           errorMessage: null,
           requestGenerationToken: res.generationToken,
@@ -1788,3 +1805,8 @@ export const useVajraStore = create<VajraStore>((set, get) => ({
     });
   },
 }));
+
+if (typeof window !== 'undefined') {
+  (window as any).__VAJRA_STORE__ = useVajraStore;
+}
+
