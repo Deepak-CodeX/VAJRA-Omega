@@ -386,6 +386,8 @@ export interface GeoTwinState {
   serviceRegions: EstimatedServiceRegion[];
   /** Task 16: Spatial load clusters */
   loadClusters: SpatialLoadCluster[];
+  /** Task 16: Spatial load zones (district locality areas) */
+  loadZones?: SpatialLoadZone[];
   /** Task 16: Electrical to geographic asset mappings */
   electricalGeoMappings: ElectricalGeoReference[];
   /** Task 17: Live dynamic geo-simulation impact state */

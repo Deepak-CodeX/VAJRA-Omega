@@ -350,7 +350,7 @@ export class RealGeoDataProvider implements IGeoDataProvider {
 
   public async loadPowerInfrastructure(cityId: string): Promise<GeoPowerAsset[]> {
     const canonicalAssets = CANONICAL_POWER_ASSETS[cityId] || [];
-    return canonicalAssets.map((asset) => {
+    const nodeAssets: GeoPowerAsset[] = canonicalAssets.map((asset) => {
       const isSub = asset.assetType === 'SUBSTATION';
       const capMW = asset.nominalCapacityMVA ? Math.round(asset.nominalCapacityMVA * 0.9) : 500;
       return {
@@ -381,6 +381,107 @@ export class RealGeoDataProvider implements IGeoDataProvider {
         },
       };
     });
+
+    // Build canonical transmission corridors connecting verified substations
+    const subMap = new Map<string, GeoPowerAsset>();
+    for (const node of nodeAssets) {
+      subMap.set(node.id, node);
+    }
+
+    const lines: GeoPowerAsset[] = [];
+    const seenLinePairs = new Set<string>();
+
+    for (const asset of canonicalAssets) {
+      // 1. Verified utility single-line diagram connections
+      if (asset.connectedAssetIds) {
+        for (const targetId of asset.connectedAssetIds) {
+          if (subMap.has(targetId) && subMap.has(asset.id)) {
+            const pairKey = [asset.id, targetId].sort().join('--');
+            if (!seenLinePairs.has(pairKey)) {
+              seenLinePairs.add(pairKey);
+              const fromSub = subMap.get(asset.id)!;
+              const toSub = subMap.get(targetId)!;
+              const midLat = (fromSub.coordinates.latitude + toSub.coordinates.latitude) / 2;
+              const midLng = (fromSub.coordinates.longitude + toSub.coordinates.longitude) / 2;
+              const targetAsset = canonicalAssets.find((a) => a.id === targetId);
+              const voltage = Math.min(fromSub.voltageKV, toSub.voltageKV);
+
+              lines.push({
+                id: `line-${pairKey}`,
+                name: `${fromSub.name.split(' ')[0]} – ${toSub.name.split(' ')[0]} ${voltage}kV Corridor`,
+                entityType: 'LINE_CORRIDOR' as const,
+                scaleLevel: 'DISTRICT_LOCALITY' as const,
+                category: 'TRANSMISSION_LINE' as const,
+                electricalAssetType: 'transmission_line' as const,
+                coordinates: { latitude: midLat, longitude: midLng },
+                pathCoordinates: [
+                  { latitude: fromSub.coordinates.latitude, longitude: fromSub.coordinates.longitude },
+                  { latitude: toSub.coordinates.latitude, longitude: toSub.coordinates.longitude },
+                ],
+                voltageKV: voltage,
+                nominalCapacityMW: Math.max(fromSub.nominalCapacityMW, toSub.nominalCapacityMW),
+                isSurveyVerified: true,
+                electricalAssetId: `line-${pairKey}`,
+                provenance: {
+                  sourceType: 'VERIFIED_EXTERNAL' as const,
+                  confidence: (asset.confidence as ConfidenceLevel) || 'HIGH',
+                  sourceReference: `${asset.source} & ${targetAsset?.source ?? 'Utility Grid SLD'}`,
+                  lastUpdated: asset.retrievedAt,
+                  isVerifiedRealWorld: true,
+                  methodologyNotes: 'Utility transmission corridor connecting verified grid substations',
+                },
+              });
+            }
+          }
+        }
+      }
+
+      // 2. Inferred sub-transmission links (clearly labeled INFERRED)
+      if (asset.inferredAssetIds) {
+        for (const targetId of asset.inferredAssetIds) {
+          if (subMap.has(targetId) && subMap.has(asset.id)) {
+            const pairKey = [asset.id, targetId].sort().join('--');
+            if (!seenLinePairs.has(pairKey)) {
+              seenLinePairs.add(pairKey);
+              const fromSub = subMap.get(asset.id)!;
+              const toSub = subMap.get(targetId)!;
+              const midLat = (fromSub.coordinates.latitude + toSub.coordinates.latitude) / 2;
+              const midLng = (fromSub.coordinates.longitude + toSub.coordinates.longitude) / 2;
+              const targetAsset = canonicalAssets.find((a) => a.id === targetId);
+              const voltage = Math.min(fromSub.voltageKV, toSub.voltageKV);
+
+              lines.push({
+                id: `inferred-line-${pairKey}`,
+                name: `[INFERRED] ${fromSub.name.split(' ')[0]} – ${toSub.name.split(' ')[0]} Link`,
+                entityType: 'LINE_CORRIDOR' as const,
+                scaleLevel: 'DISTRICT_LOCALITY' as const,
+                category: 'TRANSMISSION_LINE' as const,
+                electricalAssetType: 'transmission_line' as const,
+                coordinates: { latitude: midLat, longitude: midLng },
+                pathCoordinates: [
+                  { latitude: fromSub.coordinates.latitude, longitude: fromSub.coordinates.longitude },
+                  { latitude: toSub.coordinates.latitude, longitude: toSub.coordinates.longitude },
+                ],
+                voltageKV: voltage,
+                nominalCapacityMW: 200,
+                isSurveyVerified: false,
+                electricalAssetId: `inferred-line-${pairKey}`,
+                provenance: {
+                  sourceType: 'MODELED' as const,
+                  confidence: 'MEDIUM' as ConfidenceLevel,
+                  sourceReference: 'Spatial Proximity & Grid Hierarchy Model',
+                  lastUpdated: asset.retrievedAt,
+                  isVerifiedRealWorld: false,
+                  methodologyNotes: 'Sub-transmission link inferred from spatial proximity; not verified by utility single-line diagram',
+                },
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return [...nodeAssets, ...lines];
   }
 
   public getCacheSize(): number {

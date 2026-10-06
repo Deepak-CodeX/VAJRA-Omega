@@ -213,28 +213,49 @@ export class LoadClusterer {
     clusters: SpatialLoadCluster[],
     cityId: string,
   ): SpatialLoadZone[] {
-    return clusters.map((c) => ({
-      id: `zone-${c.id}`,
-      name: c.name,
-      entityType: 'ZONE',
-      scaleLevel: 'DISTRICT_LOCALITY',
-      coordinates: c.centroid,
-      parentId: cityId,
-      associatedElectricalAssetIds: c.memberLoadIds,
-      associatedSubstationId: c.assignedSubstationId,
-      estimatedDemandMW: c.totalDemandMW,
-      criticality: c.containsCriticalLoad ? 'CRITICAL' : 'MEDIUM',
-      loadCategory: c.loadCategory,
-      mappingType: 'SPATIAL_INFERENCE' as MappingType,
-      confidence: 'MEDIUM' as ConfidenceLevel,
-      provenance: {
-        sourceType: 'MODELED',
-        confidence: 'MEDIUM',
-        sourceReference: `Deterministic Spatial Clustering for ${cityId}`,
-        lastUpdated: new Date().toISOString(),
-        isVerifiedRealWorld: false,
-        methodologyNotes: c.clusteringMetric,
-      },
-    }));
+    return clusters.map((c) => {
+      // Generate geodetic boundary polygon ring around cluster centroid
+      const radiusM = Math.max(1200, c.radiusMeters || 1500);
+      const points = 16;
+      const boundaryPolygon: GeoCoordinate[] = [];
+      const latRad = (c.centroid.latitude * Math.PI) / 180;
+      const earthRadius = 6371000;
+      const latDelta = (radiusM / earthRadius) * (180 / Math.PI);
+      const lngDelta = (radiusM / (earthRadius * Math.cos(latRad))) * (180 / Math.PI);
+
+      for (let i = 0; i < points; i++) {
+        const angle = (i * 2 * Math.PI) / points;
+        boundaryPolygon.push({
+          latitude: c.centroid.latitude + latDelta * Math.sin(angle),
+          longitude: c.centroid.longitude + lngDelta * Math.cos(angle),
+        });
+      }
+      boundaryPolygon.push(boundaryPolygon[0]); // Close ring
+
+      return {
+        id: `zone-${c.id}`,
+        name: c.name,
+        entityType: 'ZONE',
+        scaleLevel: 'DISTRICT_LOCALITY',
+        coordinates: c.centroid,
+        boundaryPolygon,
+        parentId: cityId,
+        associatedElectricalAssetIds: c.memberLoadIds,
+        associatedSubstationId: c.assignedSubstationId,
+        estimatedDemandMW: c.totalDemandMW,
+        criticality: c.containsCriticalLoad ? 'CRITICAL' : 'MEDIUM',
+        loadCategory: c.loadCategory,
+        mappingType: 'SPATIAL_INFERENCE' as MappingType,
+        confidence: 'MEDIUM' as ConfidenceLevel,
+        provenance: {
+          sourceType: 'MODELED',
+          confidence: 'MEDIUM',
+          sourceReference: `Deterministic Spatial Clustering for ${cityId}`,
+          lastUpdated: new Date().toISOString(),
+          isVerifiedRealWorld: false,
+          methodologyNotes: c.clusteringMetric,
+        },
+      };
+    });
   }
 }

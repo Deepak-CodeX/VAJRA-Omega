@@ -24,6 +24,7 @@ import type {
   GeoViewport,
   EstimatedServiceRegion,
   SpatialLoadCluster,
+  SpatialLoadZone,
   GeoSimulationImpact,
   ServiceRegionSimulationImpact,
   CriticalInfraSimulationStatus,
@@ -70,6 +71,55 @@ export class MapEngineAdapter {
   private isDestroyed = false;
   private handlers: MapEngineEventHandlers = {};
   private currentBackdropMode: MapBackdropMode = 'CARTOGRAPHIC';
+
+  public static readonly BASE_MAP_LAYER_IDS = [
+    'background',
+    'water',
+    'waterway',
+    'water_name',
+    'landcover_ice_shelf',
+    'landcover_glacier',
+    'landuse_residential',
+    'landcover_wood',
+    'landuse_park',
+    'aeroway-taxiway',
+    'aeroway-runway-casing',
+    'aeroway-area',
+    'aeroway-runway',
+    'road_area_pier',
+    'road_pier',
+    'highway_path',
+    'highway_minor',
+    'highway_major_casing',
+    'highway_major_inner',
+    'highway_major_subtle',
+    'highway_motorway_casing',
+    'highway_motorway_inner',
+    'road_oneway',
+    'road_oneway_opposite',
+    'highway_motorway_subtle',
+    'railway_transit',
+    'railway_transit_dashline',
+    'railway_minor',
+    'railway_minor_dashline',
+    'railway',
+    'railway_dashline',
+    'highway_name_other',
+    'highway_name_motorway',
+    'boundary_state',
+    'boundary_country_z0-4',
+    'boundary_country_z5-',
+    'place_other',
+    'place_suburb',
+    'place_village',
+    'place_town',
+    'place_city',
+    'place_city_large',
+    'place_state',
+    'place_country_other',
+    'place_country_minor',
+    'place_country_major',
+  ];
 
   /**
    * Check if the client environment supports WebGL rendering.
@@ -365,6 +415,18 @@ export class MapEngineAdapter {
       },
     });
 
+    this.map.addLayer({
+      id: 'vajra-transmission-health-glow',
+      type: 'line',
+      source: 'vajra-transmission-src',
+      paint: {
+        'line-color': ['coalesce', ['get', 'healthStatusColor'], ['get', 'color'], '#38bdf8'] as any,
+        'line-width': 6.5,
+        'line-opacity': 0.45,
+        'line-blur': 3.5,
+      },
+    });
+
     // 4. Substations & Power Assets (Voltage-scaled, operational border ring)
     this.map.addSource('vajra-substations-src', {
       type: 'geojson',
@@ -388,6 +450,27 @@ export class MapEngineAdapter {
         'circle-color': ['coalesce', ['get', 'color'], '#0284c7'] as any,
         'circle-stroke-width': 2,
         'circle-stroke-color': ['coalesce', ['get', 'strokeColor'], '#10b981'] as any,
+      },
+    });
+
+    this.map.addLayer({
+      id: 'vajra-substations-health-ring',
+      type: 'circle',
+      source: 'vajra-substations-src',
+      paint: {
+        'circle-radius': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          10,
+          8,
+          14,
+          12,
+        ] as any,
+        'circle-color': 'transparent',
+        'circle-stroke-width': 2.5,
+        'circle-stroke-color': ['coalesce', ['get', 'healthStatusColor'], ['get', 'strokeColor'], '#10b981'] as any,
+        'circle-stroke-opacity': 0.9,
       },
     });
 
@@ -456,6 +539,34 @@ export class MapEngineAdapter {
       },
     });
 
+    // 7.1 Spatial Load Zones (District Locality Polygons)
+    this.map.addSource('vajra-load-zones-src', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    });
+
+    this.map.addLayer({
+      id: 'vajra-load-zones-fill',
+      type: 'fill',
+      source: 'vajra-load-zones-src',
+      paint: {
+        'fill-color': ['coalesce', ['get', 'fillColor'], '#6366f1'] as any,
+        'fill-opacity': ['coalesce', ['get', 'fillOpacity'], 0.12] as any,
+      },
+    });
+
+    this.map.addLayer({
+      id: 'vajra-load-zones-line',
+      type: 'line',
+      source: 'vajra-load-zones-src',
+      paint: {
+        'line-color': ['coalesce', ['get', 'lineColor'], '#6366f1'] as any,
+        'line-width': 1.5,
+        'line-dasharray': [4, 2],
+        'line-opacity': 0.75,
+      },
+    });
+
     // 8. Canonical Landmark Buildings Layer
     this.map.addSource('vajra-buildings-src', {
       type: 'geojson',
@@ -507,6 +618,7 @@ export class MapEngineAdapter {
           'vajra-substations-circle',
           'vajra-infra-circle',
           'vajra-load-clusters-circle',
+          'vajra-load-zones-fill',
           'vajra-service-regions-fill',
           'vajra-buildings-extrusion',
           'osm-streamed-buildings-3d',
@@ -658,6 +770,16 @@ export class MapEngineAdapter {
             color = '#eab308'; // YELLOW: warning
           }
 
+          const healthStatusColor = corr?.isTripped
+            ? '#ef4444'
+            : corr?.isOverloaded
+            ? '#f97316'
+            : (corr?.loadingPercent ?? 0) >= 85
+            ? '#eab308'
+            : isSimulated
+            ? '#a855f7'
+            : '#38bdf8';
+
           return {
             type: 'Feature' as const,
             properties: {
@@ -665,6 +787,7 @@ export class MapEngineAdapter {
               name: a.name,
               voltageKV: a.voltageKV,
               color,
+              healthStatusColor,
               loadingPercent: corr?.loadingPercent ?? 0,
               isOverloaded: corr?.isOverloaded ?? false,
               isTripped: corr?.isTripped ?? false,
@@ -705,6 +828,16 @@ export class MapEngineAdapter {
             strokeColor = '#fef08a';
           }
 
+          const healthStatusColor = status === 'FAILED'
+            ? '#ef4444' // RED: failed
+            : status === 'OVERLOAD'
+            ? '#f97316' // ORANGE: overload
+            : status === 'WARNING'
+            ? '#eab308' // YELLOW: warning
+            : isSimulated
+            ? '#a855f7' // PURPLE: simulated
+            : '#10b981'; // GREEN: healthy
+
           return {
             type: 'Feature' as const,
             properties: {
@@ -714,6 +847,7 @@ export class MapEngineAdapter {
               category: a.category,
               color,
               strokeColor,
+              healthStatusColor,
               isSimulated,
               provenanceSource: a.provenance?.sourceType ?? 'UNKNOWN',
             },
@@ -882,6 +1016,63 @@ export class MapEngineAdapter {
   }
 
   /**
+   * Updates spatial load zones (Task 16/Phase 4.4).
+   */
+  public setLoadZones(zones: SpatialLoadZone[]): void {
+    if (!this.map || !this.isLoaded) return;
+
+    const source = this.map.getSource('vajra-load-zones-src') as GeoJSONSource | undefined;
+    if (!source) return;
+
+    const features = zones.map((z) => {
+      let ring: number[][] = [];
+      if (z.boundaryPolygon && z.boundaryPolygon.length > 0) {
+        ring = z.boundaryPolygon.map((c) => [c.longitude, c.latitude]);
+      } else {
+        const radiusM = 1500;
+        const latRad = (z.coordinates.latitude * Math.PI) / 180;
+        const earthRadius = 6371000;
+        const latDelta = (radiusM / earthRadius) * (180 / Math.PI);
+        const lngDelta = (radiusM / (earthRadius * Math.cos(latRad))) * (180 / Math.PI);
+        for (let i = 0; i < 16; i++) {
+          const angle = (i * 2 * Math.PI) / 16;
+          ring.push([
+            z.coordinates.longitude + lngDelta * Math.cos(angle),
+            z.coordinates.latitude + latDelta * Math.sin(angle),
+          ]);
+        }
+        ring.push(ring[0]);
+      }
+
+      let categoryColor = '#6366f1'; // Indigo default (MIXED/RESIDENTIAL)
+      if (z.criticality === 'CRITICAL' || z.loadCategory === 'CRITICAL') categoryColor = '#ef4444';
+      else if (z.loadCategory === 'INDUSTRIAL') categoryColor = '#f59e0b';
+      else if (z.loadCategory === 'COMMERCIAL') categoryColor = '#06b6d4';
+      else if (z.loadCategory === 'EV') categoryColor = '#10b981';
+
+      return {
+        type: 'Feature' as const,
+        properties: {
+          id: z.id,
+          name: z.name,
+          demandMW: z.estimatedDemandMW,
+          category: z.loadCategory,
+          criticality: z.criticality,
+          fillColor: categoryColor,
+          fillOpacity: 0.12,
+          lineColor: categoryColor,
+        },
+        geometry: {
+          type: 'Polygon' as const,
+          coordinates: [ring],
+        },
+      };
+    });
+
+    source.setData({ type: 'FeatureCollection', features });
+  }
+
+  /**
    * Updates building footprints and 3D extrusion features (Task 18 & 19).
    */
   public setBuildings(
@@ -952,21 +1143,36 @@ export class MapEngineAdapter {
   }
 
   /**
-   * Toggles layer visibility dynamically.
+   * Toggles layer visibility dynamically (Phase 4.4 layer integrity engine).
    */
   public setLayerVisibility(layerId: string, visible: boolean): void {
     if (!this.map || !this.isLoaded) return;
 
+    // 1. Base Map toggle controls all background, cartographic, and satellite layers
+    if (layerId === 'BASE_MAP') {
+      for (const id of MapEngineAdapter.BASE_MAP_LAYER_IDS) {
+        if (this.map.getLayer(id)) {
+          this.map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+        }
+      }
+      if (this.map.getLayer('satellite-imagery-layer')) {
+        const satVisible = visible && this.currentBackdropMode === 'SATELLITE';
+        this.map.setLayoutProperty('satellite-imagery-layer', 'visibility', satVisible ? 'visible' : 'none');
+      }
+      return;
+    }
+
+    // 2. Specialized overlays mapping (strictly isolated targets)
     const layerMap: Record<string, string[]> = {
-      BASE_MAP: ['carto-dark-base'],
       BUILDINGS: ['vajra-buildings-fill', 'vajra-buildings-line', 'vajra-buildings-extrusion', 'osm-streamed-buildings-3d'],
       '3D_BUILDINGS': ['vajra-buildings-extrusion', 'osm-streamed-buildings-3d'],
-      SUBSTATIONS: ['vajra-substations-circle', 'vajra-substations-glow'],
+      SUBSTATIONS: ['vajra-substations-circle'],
       TRANSMISSION: ['vajra-transmission-glow', 'vajra-transmission-core'],
       CRITICAL_INFRASTRUCTURE: ['vajra-infra-circle'],
       SERVICE_REGIONS: ['vajra-service-regions-fill', 'vajra-service-regions-line'],
       LOAD_CLUSTERS: ['vajra-load-clusters-circle'],
-      LOAD_ZONES: ['vajra-service-regions-fill', 'vajra-service-regions-line'],
+      LOAD_ZONES: ['vajra-load-zones-fill', 'vajra-load-zones-line'],
+      GRID_HEALTH: ['vajra-substations-health-ring', 'vajra-transmission-health-glow'],
     };
 
     const targetLayerIds = layerMap[layerId] || [layerId];

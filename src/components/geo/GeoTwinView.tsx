@@ -46,6 +46,7 @@ export default function GeoTwinView() {
   const setMapEngineStatus = useVajraStore((s) => s.setMapEngineStatus);
   const injectGeoFault = useVajraStore((s) => s.injectGeoFault);
   const topology = useVajraStore((s) => s.topology);
+  const selectGeoCity = useVajraStore((s) => s.selectGeoCity);
 
   const [inputQuery, setInputQuery] = useState('');
   const [twinData, setTwinData] = useState<CityTwinPackage | null>(null);
@@ -54,6 +55,7 @@ export default function GeoTwinView() {
   >(null);
   const [isFallbackMode, setIsFallbackMode] = useState(false);
   const [backdropMode, setBackdropModeState] = useState<MapBackdropMode>('CARTOGRAPHIC');
+  const [isMapReady, setIsMapReady] = useState(false);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapAdapterRef = useRef<MapEngineAdapter | null>(null);
@@ -100,6 +102,7 @@ export default function GeoTwinView() {
         {
           onLoad: () => {
             setMapEngineStatus('READY');
+            setIsMapReady(true);
             adapter.setBackdropMode(backdropMode);
             if (selectedCity) {
               adapter.setCityBoundary(selectedCity);
@@ -126,8 +129,16 @@ export default function GeoTwinView() {
     return () => {
       adapter.destroy();
       mapAdapterRef.current = null;
+      setIsMapReady(false);
     };
   }, []);
+
+  // Ensure full Geo-Twin city mapping (service regions, load clusters, load zones) is initialized
+  useEffect(() => {
+    if (selectedCity && (!geoTwin?.serviceRegions || geoTwin.serviceRegions.length === 0)) {
+      selectGeoCity(selectedCity.id);
+    }
+  }, [selectedCity, geoTwin?.serviceRegions, selectGeoCity]);
 
   // Load twin data when selectedCity changes (City-Independent Real Provider)
   useEffect(() => {
@@ -138,27 +149,31 @@ export default function GeoTwinView() {
     realProvider.loadCityTwin(selectedCity.id).then((pkg) => {
       setTwinData(pkg);
 
-      if (mapAdapterRef.current && pkg) {
+      if (mapAdapterRef.current && pkg && isMapReady) {
         mapAdapterRef.current.setCityBoundary(pkg.city);
-        mapAdapterRef.current.setPowerAssets(pkg.powerAssets);
-        mapAdapterRef.current.setCriticalInfrastructure(pkg.criticalInfrastructure);
+        mapAdapterRef.current.setPowerAssets(pkg.powerAssets, geoTwin?.simulationImpact?.corridorImpacts);
+        mapAdapterRef.current.setCriticalInfrastructure(pkg.criticalInfrastructure, geoTwin?.simulationImpact?.criticalInfraStatus);
         mapAdapterRef.current.setBuildings(pkg.buildings);
         mapAdapterRef.current.flyToCity(pkg.city, 2000);
       }
     });
-  }, [selectedCity]);
+  }, [selectedCity, isMapReady]);
 
   // Synchronize layer visibility to MapEngine
   useEffect(() => {
-    if (!mapAdapterRef.current || !visibleLayers) return;
+    if (!mapAdapterRef.current || !visibleLayers || !isMapReady) return;
     for (const [layerId, isVis] of Object.entries(visibleLayers)) {
       mapAdapterRef.current.setLayerVisibility(layerId, isVis);
     }
-  }, [visibleLayers]);
+  }, [visibleLayers, isMapReady]);
 
-  // Sync simulation impacts, service regions, load clusters, and 3D buildings to MapEngine
+  // Sync simulation impacts, service regions, load clusters, load zones, and 3D buildings to MapEngine
   useEffect(() => {
-    if (!mapAdapterRef.current) return;
+    if (!mapAdapterRef.current || !isMapReady) return;
+
+    if (selectedCity) {
+      mapAdapterRef.current.setCityBoundary(selectedCity);
+    }
     if (geoTwin?.serviceRegions) {
       mapAdapterRef.current.setServiceRegions(
         geoTwin.serviceRegions,
@@ -167,6 +182,9 @@ export default function GeoTwinView() {
     }
     if (geoTwin?.loadClusters) {
       mapAdapterRef.current.setLoadClusters(geoTwin.loadClusters);
+    }
+    if (geoTwin?.loadZones) {
+      mapAdapterRef.current.setLoadZones(geoTwin.loadZones);
     }
     if (twinData?.powerAssets) {
       mapAdapterRef.current.setPowerAssets(
@@ -189,13 +207,22 @@ export default function GeoTwinView() {
         true,
       );
     }
+    if (visibleLayers) {
+      for (const [layerId, isVis] of Object.entries(visibleLayers)) {
+        mapAdapterRef.current.setLayerVisibility(layerId, isVis);
+      }
+    }
   }, [
+    isMapReady,
+    selectedCity,
     geoTwin?.serviceRegions,
     geoTwin?.loadClusters,
+    geoTwin?.loadZones,
     geoTwin?.simulationImpact,
     twinData?.powerAssets,
     twinData?.criticalInfrastructure,
     twinData?.buildings,
+    visibleLayers,
   ]);
 
   // Update selected entity details drawer
@@ -238,7 +265,7 @@ export default function GeoTwinView() {
       return;
     }
 
-    const foundCluster = geoTwin.loadClusters.find((c) => c.id === id);
+    const foundCluster = geoTwin?.loadClusters.find((c) => c.id === id);
     if (foundCluster) {
       setSelectedEntityDetails({
         id: foundCluster.id,
@@ -258,8 +285,21 @@ export default function GeoTwinView() {
       return;
     }
 
+    const foundZone = geoTwin?.loadZones?.find((z) => z.id === id);
+    if (foundZone) {
+      setSelectedEntityDetails({
+        id: foundZone.id,
+        name: foundZone.name,
+        entityType: 'ZONE',
+        scaleLevel: 'DISTRICT_LOCALITY',
+        coordinates: foundZone.coordinates,
+        provenance: foundZone.provenance,
+      } as any);
+      return;
+    }
+
     setSelectedEntityDetails(null);
-  }, [geoTwin?.selectedEntityId, twinData, geoTwin?.serviceRegions, geoTwin?.loadClusters]);
+  }, [geoTwin?.selectedEntityId, twinData, geoTwin?.serviceRegions, geoTwin?.loadClusters, geoTwin?.loadZones]);
 
   const handleSearchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
