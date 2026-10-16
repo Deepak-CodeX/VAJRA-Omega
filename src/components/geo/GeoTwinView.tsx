@@ -53,6 +53,8 @@ const VALIDATION_CITIES = [
   { id: 'city-chennai', label: 'Chennai' },
   { id: 'city-kolkata', label: 'Kolkata' },
   { id: 'city-pune', label: 'Pune' },
+  { id: 'city-indore', label: 'Indore' },
+  { id: 'city-surat', label: 'Surat' },
 ];
 
 export default function GeoTwinView() {
@@ -390,23 +392,33 @@ export default function GeoTwinView() {
         </div>
 
         {/* Center: Search Input */}
-        <form onSubmit={handleSearchSubmit} className="flex items-center gap-1.5 flex-1 max-w-xs">
-          <input
-            type="text"
-            value={inputQuery}
-            onChange={(e) => setInputQuery(e.target.value)}
-            placeholder="Search city..."
-            disabled={isResolving}
-            className="flex-1 rounded border border-[#1b2a38] bg-[#070c12] px-2 py-0.5 text-[11px] text-[#e0edf5] placeholder-[#3a5568] focus:border-[#00e5c8] focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={isResolving || !inputQuery.trim()}
-            className="rounded border border-[#00e5c8]/40 bg-[#00e5c8]/10 px-2.5 py-0.5 text-[10px] font-bold text-[#00e5c8] hover:bg-[#00e5c8]/20 disabled:opacity-40"
-          >
-            {isResolving ? '...' : 'FLY'}
-          </button>
-        </form>
+        <div className="flex flex-col flex-1 max-w-sm">
+          <form onSubmit={handleSearchSubmit} className="flex items-center gap-1.5 w-full">
+            <input
+              type="text"
+              value={inputQuery}
+              onChange={(e) => {
+                setInputQuery(e.target.value);
+                if (searchFeedback) setSearchFeedback(null);
+              }}
+              placeholder="Search city or asset (e.g. Surat, Indore)..."
+              disabled={isResolving}
+              className="flex-1 rounded border border-[#1b2a38] bg-[#070c12] px-2 py-0.5 text-[11px] text-[#e0edf5] placeholder-[#3a5568] focus:border-[#00e5c8] focus:outline-none"
+            />
+            <button
+              type="submit"
+              disabled={isResolving || !inputQuery.trim()}
+              className="rounded border border-[#00e5c8]/40 bg-[#00e5c8]/10 px-2.5 py-0.5 text-[10px] font-bold text-[#00e5c8] hover:bg-[#00e5c8]/20 disabled:opacity-40"
+            >
+              {isResolving ? '...' : 'FLY'}
+            </button>
+          </form>
+          {(searchFeedback || errorMessage) && (
+            <div className={`text-[9px] mt-0.5 truncate font-mono ${searchFeedback?.includes('not found') || errorMessage ? 'text-[#ff6b6b]' : 'text-[#00e5c8]'}`}>
+              {searchFeedback || errorMessage}
+            </div>
+          )}
+        </div>
 
         {/* Right: Backdrop Mode & Live Grid Telemetry HUD */}
         <div className="flex items-center gap-2">

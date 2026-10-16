@@ -4,6 +4,8 @@ import React, { useState, useMemo } from 'react';
 import type { PowerAsset } from '@/types/powerAsset';
 import type { GeoFeatureIdentity } from '@/types/geoFeatureIdentity';
 
+export type InspectorTabId = 'OVERVIEW' | 'IDENTITY' | 'GEOGRAPHY' | 'GEODETIC' | 'ELECTRICAL' | 'DEMAND' | 'EVENTS' | 'SIMULATION';
+
 interface AssetInspectorDrawerProps {
   asset: PowerAsset | null;
   featureIdentity?: GeoFeatureIdentity | null;
@@ -82,9 +84,9 @@ export default function AssetInspectorDrawer({
 
   // Contextual Tabs: Do NOT show electrical tabs for plain buildings
   const availableTabs = useMemo(() => {
-    const tabs: Array<{ id: 'IDENTITY' | 'GEODETIC' | 'ELECTRICAL' | 'DEMAND' | 'SIMULATION'; label: string }> = [
-      { id: 'IDENTITY', label: 'Identity' },
-      { id: 'GEODETIC', label: 'Geodetic' },
+    const tabs: Array<{ id: InspectorTabId; label: string }> = [
+      { id: 'OVERVIEW', label: 'Identity' },
+      { id: 'GEOGRAPHY', label: 'Geodetic' },
     ];
     if (electrical || category === 'SUBSTATION' || category === 'TRANSMISSION_LINE') {
       tabs.push({ id: 'ELECTRICAL', label: 'Electrical' });
@@ -92,16 +94,17 @@ export default function AssetInspectorDrawer({
     if (building || loadRegion || category === 'LOAD_REGION') {
       tabs.push({ id: 'DEMAND', label: 'Demand' });
     }
+    tabs.push({ id: 'EVENTS', label: 'Events' });
     if (category === 'SUBSTATION' || category === 'TRANSMISSION_LINE' || category === 'CRITICAL_INFRASTRUCTURE') {
       tabs.push({ id: 'SIMULATION', label: 'Sim' });
     }
     return tabs;
   }, [electrical, category, building, loadRegion]);
 
-  const [activeTab, setActiveTab] = useState<'IDENTITY' | 'GEODETIC' | 'ELECTRICAL' | 'DEMAND' | 'SIMULATION'>('IDENTITY');
+  const [activeTab, setActiveTab] = useState<InspectorTabId>('OVERVIEW');
 
-  // Fallback to IDENTITY if activeTab is not relevant for current feature
-  const effectiveTab = availableTabs.some((t) => t.id === activeTab) ? activeTab : 'IDENTITY';
+  // Fallback to OVERVIEW if activeTab is not relevant for current feature
+  const effectiveTab = availableTabs.some((t) => t.id === activeTab) ? activeTab : 'OVERVIEW';
 
   const handleCenterCamera = () => {
     if (onFlyToAsset) {
@@ -234,8 +237,8 @@ export default function AssetInspectorDrawer({
 
           {/* Tab Content Panels */}
           <div className="flex-1 overflow-y-auto p-3.5 font-mono text-xs space-y-3">
-            {/* ─── TAB: IDENTITY ────────────────────────────────────── */}
-            {effectiveTab === 'IDENTITY' && (
+            {/* ─── TAB: IDENTITY / OVERVIEW ─────────────────────────── */}
+            {(effectiveTab === 'OVERVIEW' || effectiveTab === 'IDENTITY') && (
               <div className="space-y-3">
                 <div>
                   <span className="text-[10px] text-[#5a7a8f]">FEATURE TYPE</span>
@@ -306,8 +309,8 @@ export default function AssetInspectorDrawer({
               </div>
             )}
 
-            {/* ─── TAB: GEODETIC ────────────────────────────────────── */}
-            {effectiveTab === 'GEODETIC' && (
+            {/* ─── TAB: GEOGRAPHY / GEODETIC ────────────────────────── */}
+            {(effectiveTab === 'GEOGRAPHY' || effectiveTab === 'GEODETIC') && (
               <div className="space-y-3">
                 <div className="rounded border border-[#1b2a38] bg-[#09131f] p-2.5 space-y-2">
                   <span className="text-[10px] font-bold text-[#00e5c8]">GEODETIC POSITION</span>
@@ -447,6 +450,21 @@ export default function AssetInspectorDrawer({
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ─── TAB: EVENTS ───────────────────────────────────────── */}
+            {effectiveTab === 'EVENTS' && (
+              <div className="space-y-3">
+                <div className="rounded border border-[#1b2a38] bg-[#0c1319] p-2.5">
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="text-[#5a7a8f]">LATEST STATUS</span>
+                    <span className="font-bold text-[#00e5c8]">{statusStr}</span>
+                  </div>
+                  <div className="mt-2 text-[9px] text-[#88a4b8]">
+                    No critical tripping alarms recorded on this feature in current session. All electrical telemetries are within operational limits.
+                  </div>
+                </div>
               </div>
             )}
 
